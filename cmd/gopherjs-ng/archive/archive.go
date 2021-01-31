@@ -9,17 +9,23 @@
 package archive
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"go/token"
+	"go/types"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
+
+	"github.com/gopherjs/gopherjs/compiler"
+	"golang.org/x/tools/go/gcexportdata"
 )
 
 const (
-	// PkgDef is an archive entry name with package meta information for the compiler.
-	PkgDef = "__.PKGDEF"
+	// PkgDefName is an archive entry name with package meta information for the compiler.
+	PkgDefName = "__.PKGDEF"
 
 	archiveHeader = "!<arch>\n"
 	sectionHdrEnd = "`\n"
@@ -128,7 +134,7 @@ func (e *Entry) parse(r io.Reader) error {
 // sectionFormat, then followed by file data padded with "\n" to even byte count
 // if necessary.
 type Archive struct {
-	Entries []*Entry
+	Entries []Entry
 }
 
 // Load .a archive into memory.
@@ -148,7 +154,7 @@ func Load(r io.Reader) (Archive, error) {
 		} else if err != nil {
 			return a, fmt.Errorf("failed to parse archive section: %w", err)
 		}
-		a.Entries = append(a.Entries, &e)
+		a.Entries = append(a.Entries, e)
 	}
 	return a, nil
 }
@@ -170,12 +176,73 @@ func (a *Archive) Write(w io.Writer) error {
 }
 
 // Get returns index and pointer to an archive entry with the given name, or -1
-// and nil if such an entry is not present.
-func (a *Archive) Get(name string) (int, *Entry) {
+// and Entry{} if such an entry is not present.
+func (a *Archive) Get(name string) (int, Entry) {
 	for i, e := range a.Entries {
 		if e.Name == name {
 			return i, e
 		}
 	}
-	return -1, nil
+	return -1, Entry{}
+}
+
+// PkgDef represents Go package metadata entry in the archive.
+type PkgDef struct {
+	GOOS        string
+	GOARCH      string
+	Version     string
+	Experiments string
+	BuildID     string
+	Package     *types.Package
+	FSet        *token.FileSet
+}
+
+// NewPkgDef returns PkgDef instance configures according to GopherJS needs.
+func NewPkgDef(buildID string, pkg *types.Package, fset *token.FileSet) *PkgDef {
+	return &PkgDef{
+		GOOS:        "js",
+		GOARCH:      "js",
+		Version:     compiler.Version,
+		Experiments: "X:none",
+		BuildID:     buildID,
+		Package:     pkg,
+		FSet:        fset,
+	}
+}
+
+func (p *PkgDef) Write(w io.Writer) error {
+	// Write metadata file header.
+	if _, err := fmt.Fprintf(w, "go object %s %s %s %s\n", p.GOOS, p.GOARCH, p.Version, p.Experiments); err != nil {
+		return fmt.Errorf("failed to write go object header: %w", err)
+	}
+	if p.BuildID != "" {
+		if _, err := fmt.Fprintf(w, "build id %q\n", p.BuildID); err != nil {
+			return fmt.Errorf("failed to write build id: %w", err)
+		}
+	}
+	if p.Package != nil && p.Package.Name() == "main" {
+		if _, err := fmt.Fprintf(w, "main\n"); err != nil {
+			return fmt.Errorf("failed to write main package tag: %w", err)
+		}
+	}
+	if _, err := fmt.Fprint(w, "\n"); err != nil {
+		return fmt.Errorf("failed to write header end: %w", err)
+	}
+
+	// Write compiler package info, if present.
+	if p.Package != nil {
+		if err := gcexportdata.Write(w, p.FSet, p.Package); err != nil {
+			return fmt.Errorf("failed to encode gc export data: %w", err)
+		}
+	}
+	return nil
+}
+
+// AsEntry returns an archive entry representing the package definition.
+func (p *PkgDef) AsEntry() (Entry, error) {
+	buf := &bytes.Buffer{}
+	if err := p.Write(buf); err != nil {
+		return Entry{}, err
+	}
+	return NewEntry(PkgDefName, buf.Bytes()), nil
 }

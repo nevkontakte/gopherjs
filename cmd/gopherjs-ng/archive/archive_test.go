@@ -2,14 +2,17 @@ package archive
 
 import (
 	"bytes"
+	"go/token"
+	"go/types"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/gopherjs/gopherjs/compiler"
 )
 
 func TestArchive(t *testing.T) {
 	a := Archive{
-		Entries: []*Entry{
+		Entries: []Entry{
 			{
 				Name:  "no_padding",
 				MTime: 42,
@@ -55,7 +58,7 @@ func TestArchive(t *testing.T) {
 		tests := []struct {
 			name      string
 			wantIdx   int
-			wantEntry *Entry
+			wantEntry Entry
 		}{
 			{
 				name:      "no_padding",
@@ -68,7 +71,7 @@ func TestArchive(t *testing.T) {
 			}, {
 				name:      "not_found",
 				wantIdx:   -1,
-				wantEntry: nil,
+				wantEntry: Entry{},
 			},
 		}
 
@@ -78,10 +81,35 @@ func TestArchive(t *testing.T) {
 				if i != test.wantIdx {
 					t.Errorf("a.Get(%q) returned index %d, want %d", test.name, i, test.wantIdx)
 				}
-				if e != test.wantEntry {
-					t.Errorf("a.Get(%q) returned entry %p, want %p", test.name, e, test.wantEntry)
+				if !cmp.Equal(e, test.wantEntry) {
+					t.Errorf("a.Get(%q) returned entry %+v, want %+v", test.name, e, test.wantEntry)
 				}
 			})
+		}
+	})
+}
+
+func TestPkgDef(t *testing.T) {
+	t.Run("write", func(t *testing.T) {
+		p := NewPkgDef("abc/def", types.NewPackage("some/pkg", "main"), token.NewFileSet())
+		buf := &bytes.Buffer{}
+		if err := p.Write(buf); err != nil {
+			t.Fatalf("p.Write() returned error: %s", err)
+		}
+
+		b := buf.Bytes()
+		pos := bytes.Index(b, []byte("\n\n"))
+		if pos == -1 {
+			t.Errorf("Failed to find pkgdef header end")
+		}
+		pos += 2
+		header := buf.String()[0:pos]
+
+		want := "go object js js " + compiler.Version + " X:none\n" +
+			"build id \"abc/def\"\n" +
+			"main\n\n"
+		if diff := cmp.Diff(want, header); diff != "" {
+			t.Errorf("p.Write() produced diff (-want,+got):\n%s", diff)
 		}
 	})
 }
