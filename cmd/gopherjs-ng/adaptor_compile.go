@@ -4,25 +4,30 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"go/types"
 	"log"
+	"os"
+	"path"
+
+	"github.com/gopherjs/gopherjs/cmd/gopherjs-ng/archive"
 )
 
 type compilerFlags struct {
 	commonFlags
 	Output           string
-	TrimPath         string
+	TrimPath         string // unimplemented
 	Package          string
-	Complete         bool
+	Complete         bool // unimplemented
 	BuildID          string
-	GoVersion        string
-	LocalImportPath  string
-	ImportCfg        string
+	GoVersion        string // unimplemented
+	LocalImportPath  string // unimplemented
+	ImportCfg        string // unimplemented
 	Pack             bool
-	Concurrency      int
-	CompilingStd     bool
-	CompilingRuntime bool
-	SymABIs          string
-	ASMHeader        string
+	Concurrency      int    // unimplemented
+	CompilingStd     bool   // unimplemented
+	CompilingRuntime bool   // unimplemented
+	SymABIs          string // unimplemented
+	ASMHeader        string // unimplemented
 }
 
 func (cf *compilerFlags) Bind(tool string) *flag.FlagSet {
@@ -67,6 +72,30 @@ func compile(ctx context.Context, toolPath string, args ...string) error {
 		return nil
 	}
 
-	log.Printf("%+v", flags)
+	if !flags.Pack {
+		// At the moment we expect to always produce .a archives.
+		log.Fatalf("FIXME: -pack is not provided: %v", args)
+	}
+
+	// TODO: Invoke GopherJS compiler.
+
+	e, err := archive.NewPkgDef(
+		flags.BuildID,
+		types.NewPackage(flags.Package, path.Base(flags.Package)), nil,
+	).AsEntry()
+	if err != nil {
+		return fmt.Errorf("failed to prepare __.PKGDEF archive entry: %s", err)
+	}
+	a := archive.NewArchive(e)
+
+	f, err := os.Create(flags.Output)
+	if err != nil {
+		return fmt.Errorf("failed to open %q for writing: %w", flags.Output, err)
+	}
+	defer f.Close()
+
+	if err := a.Write(f); err != nil {
+		return fmt.Errorf("failed to write archive %s: %w", flags.Output, err)
+	}
 	return nil
 }

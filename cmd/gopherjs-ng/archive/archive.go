@@ -137,6 +137,11 @@ type Archive struct {
 	Entries []Entry
 }
 
+// NewArchive creates an archive with the given entries.
+func NewArchive(e ...Entry) Archive {
+	return Archive{Entries: e}
+}
+
 // Load .a archive into memory.
 //
 // Returns Archive instance with entries populated with the data from the reader.

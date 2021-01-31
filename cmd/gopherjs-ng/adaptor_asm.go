@@ -4,17 +4,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"os"
 )
 
 type asmFlags struct {
 	commonFlags
-	Output      string
-	TrimPath    string
-	Package     string
-	IncludePath repeatedFlag
-	Defines     repeatedFlag
-	GenSymABIs  bool
+	Output           string
+	TrimPath         string
+	Package          string
+	IncludePath      repeatedFlag
+	Defines          repeatedFlag
+	GenSymABIs       bool
+	CompilingRuntime bool
 }
 
 func (af *asmFlags) Bind(tool string) *flag.FlagSet {
@@ -33,6 +34,8 @@ func (af *asmFlags) Bind(tool string) *flag.FlagSet {
 		"Predefined symbol with optional simple value -D=identifier=value; can be set multiple times.")
 	fs.BoolVar(&af.GenSymABIs, "gensymabis", false,
 		"Write symbol ABI information to output file, don't assemble.")
+	fs.BoolVar(&af.CompilingRuntime, "compiling-runtime", false,
+		"Source to be compiled is part of the Go runtime")
 	return fs
 }
 
@@ -46,6 +49,15 @@ func asm(ctx context.Context, toolPath string, args ...string) error {
 		return nil
 	}
 
-	log.Printf("%+v", flags)
+	// TODO: GopherJS doesn't really support Go assembly. For now we just create
+	// an empty output file to make the Go tool happy, but ideally we should avoid
+	// invoking asm tool in the first place.
+
+	f, err := os.Create(flags.Output)
+	if err != nil {
+		return fmt.Errorf("failed to create %q: %w", flags.Output, err)
+	}
+	f.Close()
+
 	return nil
 }
