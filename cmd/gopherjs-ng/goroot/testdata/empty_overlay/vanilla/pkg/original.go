@@ -1,0 +1,3 @@
+package vanilla
+
+func thisFunctionWillRemain() {}

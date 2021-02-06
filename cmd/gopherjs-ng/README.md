@@ -20,9 +20,12 @@ It also has a few potential disadvantages:
 ## Known issues
 
 - The actual compilation is not implemented yet.
-- Standard library augmentation is not implemented yet.
 - `gopherjs-ng build` doesn't add `.js` extension to the file.
 - `install/test/run` verbs are not supported.
+- Doesn't support bundling raw '.js' files in.
+- `serve` command is not supported.
+- Build tags changed to GOOS=js GOARCH=js, in the past GOOS used to be build OS.
+- No build tag unique to GopherJS.
 
 ## Setup
 
