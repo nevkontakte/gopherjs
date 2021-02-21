@@ -101,6 +101,7 @@ func (m *gorootMerger) augmentPackage(dir string, vanilla []os.FileInfo, overlay
 		loadFS := http.Dir(m.vanillaRoot) // Read from the real file system.
 		loadPath := filepath.Join(dir, o.Name())
 		writePath := filepath.Join(mergedDir, o.Name())
+		// TODO: Add transformer that would replace sync → nosync for certain packages.
 		if err := processSource(loadFS, loadPath, writePath, sf.Prune); err != nil {
 			return fmt.Errorf("failed to process original source %q: %w", loadPath, err)
 		}
@@ -147,8 +148,36 @@ func onlyGoSources(in []os.FileInfo) []os.FileInfo {
 	return out
 }
 
-// TODO: Populate filters.
-var extraFilters map[string]fileFilter = map[string]fileFilter{}
+func includeOnly(names ...string) fileFilter {
+	return func(in []os.FileInfo) []os.FileInfo {
+		out := []os.FileInfo{}
+		for _, info := range in {
+			for _, allowed := range names {
+				if info.Name() == allowed {
+					out = append(out, info)
+					break
+				}
+			}
+		}
+		return out
+	}
+}
+
+// extraFilters contains a list of additional source file-level filters that
+// need to be applied to certain packages. The may is keyed with package import
+// paths and contains fileFilter functions that return the relevant subset of
+// source files.
+//
+// This kind of filtering is helpful, since it reduces the amount of code that
+// the overlay needs to deal with.
+//
+// TODO: In theory, this should not be needed if we are using build tags correctly.
+var extraFilters map[string]fileFilter = map[string]fileFilter{
+	"runtime":              includeOnly("typekind.go", "error.go"),
+	"runtime/internal/sys": includeOnly("zversion.go", "stubs.go", "zgoos_js.go", "arch.go"),
+	"runtime/pprof":        includeOnly(), // Exclude all vanilla sources.
+	"crypto/rand":          includeOnly("rand.go", "util.go"),
+}
 
 func abs(p string) string {
 	a, err := filepath.Abs(p)

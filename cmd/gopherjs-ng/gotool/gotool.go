@@ -61,8 +61,9 @@ func (t GoTool) Run(ctx context.Context, subcmd string, args ...string) error {
 		subcmd,
 		"-toolexec=" + self + " adaptor", // Redirect toolchain calls back to ourselves.
 		"-tags=" + strings.Join([]string{
-			"netgo",  // See https://godoc.org/net#hdr-Name_Resolution.
-			"purego", // See https://golang.org/issues/23172.
+			"netgo",            // See https://godoc.org/net#hdr-Name_Resolution.
+			"purego",           // See https://golang.org/issues/23172.
+			"math_big_pure_go", // Avoid using any assembly in math/big package.
 		}, ","),
 	}, args...)
 

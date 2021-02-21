@@ -5,14 +5,29 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"path"
+	"runtime/pprof"
 
 	"github.com/gopherjs/gopherjs/cmd/gopherjs-ng/goroot"
 	"github.com/gopherjs/gopherjs/cmd/gopherjs-ng/gotool"
 )
 
+var (
+	cpuProfile = flag.String("cpu_profile", "", "If set, will enable CPU profiling and write the profile to the specified file.")
+)
+
+func main() {
+	ctx := context.Background()
+	if err := run(ctx); err != nil {
+		log.Fatalf("Fatal error: %s", err)
+	}
+}
+
 func run(ctx context.Context) error {
 	flag.Parse()
+
+	defer initiateProfiling()()
 
 	args := flag.Args()
 	if len(args) == 0 {
@@ -60,9 +75,21 @@ func adaptor(ctx context.Context, args ...string) error {
 	}
 }
 
-func main() {
-	ctx := context.Background()
-	if err := run(ctx); err != nil {
-		log.Fatalf("Fatal error: %s", err)
+func initiateProfiling() func() {
+	if *cpuProfile == "" {
+		return func() { /* Nothing to do here. */ }
+	}
+	f, err := os.Create(*cpuProfile)
+	if err != nil {
+		log.Fatal("Could not create CPU profile: ", err)
+	}
+
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Fatal("Could not start CPU profile: ", err)
+	}
+
+	return func() { // Cleanup.
+		pprof.StopCPUProfile()
+		f.Close()
 	}
 }

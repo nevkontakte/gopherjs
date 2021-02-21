@@ -1,6 +1,7 @@
 package goroot
 
 import (
+	"bufio"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,6 +14,8 @@ import (
 
 	"golang.org/x/tools/go/ast/astutil"
 )
+
+const ioBufSize = 10 * 1024 // 10 KiB
 
 // SymbolFilter implements top-level symbol pruning for augmented packages.
 //
@@ -135,7 +138,11 @@ func writeAST(fset *token.FileSet, path string, source *ast.File) error {
 	}
 	defer f.Close()
 
-	return printer.Fprint(f, fset, source)
+	// Using buffered IO significantly improves performance here.
+	bf := bufio.NewWriterSize(f, ioBufSize)
+	defer bf.Flush()
+
+	return printer.Fprint(bf, fset, source)
 }
 
 func copyUnmodified(loadFS http.FileSystem, loadPath, writePath string) error {
