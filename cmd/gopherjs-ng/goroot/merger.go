@@ -8,6 +8,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // gorootMerger traverses both vanilla overlay GOROOT sources and generates a
@@ -57,18 +59,28 @@ func (m *gorootMerger) dir(dir string) error {
 		return fmt.Errorf("failed to enumerate files in %q: %w", overlayDir, err)
 	}
 
+	g := errgroup.Group{}
+
 	// Apply GopherJS augmentations to the original sources.
-	if err := m.augmentPackage(dir, onlyFiles(vanillaEntries), onlyFiles(overlayEntries)); err != nil {
-		return fmt.Errorf("failed to augment %q: %w", dir, err)
-	}
+	g.Go(func() error {
+		if err := m.augmentPackage(dir, onlyFiles(vanillaEntries), onlyFiles(overlayEntries)); err != nil {
+			return fmt.Errorf("failed to augment %q: %w", dir, err)
+		}
+		return nil
+	})
 
 	// Now traverse all subdirectories and merge them in the same way.
 	for _, child := range onlyDirs(vanillaEntries) {
-		if err := m.dir(path.Join(dir, child.Name())); err != nil {
-			return err
-		}
+		subdir := path.Join(dir, child.Name())
+		g.Go(func() error {
+			if err := m.dir(subdir); err != nil {
+				return err
+			}
+			return nil
+		})
 	}
-	return nil
+
+	return g.Wait()
 }
 
 // augmentPackage processes sources in the given GOROOT directory and generates
