@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/kylelemons/godebug/diff"
 )
 
 const exampleSource = `package example
@@ -24,7 +26,11 @@ type SomeAlias = SomeType
 `
 
 const prunedSource = `package example
+// func SomeFunc() — GopherJS replacement at example.go:1:11
+
 type SomeType struct{}
+// func (SomeType) SomeMethod(b int) — GopherJS replacement at example.go:1:11
+
 var SomeVar int
 const SomeConst = 0
 type SomeIface interface {
@@ -40,25 +46,32 @@ func TestSymbolFilterCollect(t *testing.T) {
 	sf.Collect(f)
 
 	want := SymbolFilter{
-		"SomeFunc":            true,
-		"SomeType":            true,
-		"SomeType.SomeMethod": true,
-		"SomeVar":             true,
-		"SomeConst":           true,
-		"SomeIface":           true,
-		"SomeAlias":           true,
+		WillPrune: map[string]token.Pos{
+			"SomeFunc":            token.NoPos,
+			"SomeType":            token.NoPos,
+			"SomeType.SomeMethod": token.NoPos,
+			"SomeVar":             token.NoPos,
+			"SomeConst":           token.NoPos,
+			"SomeIface":           token.NoPos,
+			"SomeAlias":           token.NoPos,
+		},
 	}
 
-	if diff := cmp.Diff(want, sf); diff != "" {
+	if diff := cmp.Diff(want, sf, cmpopts.IgnoreTypes(token.NoPos)); diff != "" {
 		t.Errorf("SymbolFilter.Collect() returned diff (-want,+got):\n%s", diff)
 	}
 }
 
 func TestSymbolFilterPrune(t *testing.T) {
 	filter := func(names ...string) SymbolFilter {
-		sf := SymbolFilter{}
+		fset := token.NewFileSet()
+		f := fset.AddFile("example.go", fset.Base(), 42)
+		sf := SymbolFilter{
+			FileSet:   fset,
+			WillPrune: map[string]token.Pos{},
+		}
 		for _, n := range names {
-			sf[n] = true
+			sf.WillPrune[n] = f.Pos(10)
 		}
 		return sf
 	}
@@ -79,61 +92,100 @@ func TestSymbolFilterPrune(t *testing.T) {
 			descr:    "func",
 			filter:   filter("Func"),
 			original: "package x; func Func() {}; func OtherFunc() {}",
-			want:     "package x; func OtherFunc() {}",
+			want:     "package x\n// func Func() — GopherJS replacement at example.go:1:11\nfunc OtherFunc() {}",
 		},
 		{
 			descr:    "method",
 			filter:   filter("T.M"),
 			original: "package x; type T int; func (T) M() {}",
-			want:     "package x; type T int",
+			want:     "package x; type T int\n // func (T) M() — GopherJS replacement at example.go:1:11",
 		},
 		{
 			descr:    "single var",
 			filter:   filter("V"),
 			original: "package x; var V int = 1",
-			want:     "package x; var _ int = 1",
+			want:     "package x\n// var V <abbreviated> — GopherJS replacement at example.go:1:11",
+		},
+		{
+			descr:    "var group partial",
+			filter:   filter("V1"),
+			original: "package x; var (V1 int; V2 int)",
+			want: "package x\n" +
+				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
+				"var (V2 int)",
 		},
 		{
 			descr:    "var group",
 			filter:   filter("V1", "V2"),
 			original: "package x; var (V1 int; V2 int)",
-			want:     "package x; var (_ int; _ int)",
+			want: "package x\n" +
+				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
+				"// var V2 <abbreviated> — GopherJS replacement at example.go:1:11",
+		},
+		{
+			descr:    "multi var partial",
+			filter:   filter("V1"),
+			original: "package x; func F() (int, int) {return 1, 2}; var V1, V2 = F()",
+			want: "package x; func F() (int, int) {return 1, 2}\n" +
+				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
+				"var _, V2 = F()\n",
+		},
+		{
+			descr:    "multi var",
+			filter:   filter("V1", "V2"),
+			original: "package x; func F() (int, int) {return 1, 2}; var V1, V2 = F()",
+			want: "package x; func F() (int, int) {return 1, 2}\n" +
+				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
+				"// var V2 <abbreviated> — GopherJS replacement at example.go:1:11\n",
 		},
 		{
 			descr:    "single const",
 			filter:   filter("C"),
 			original: "package x; const C int = 1",
-			want:     "package x; const _ int = 1",
+			want:     "package x\n// const C <abbreviated> — GopherJS replacement at example.go:1:11",
 		},
 		{
 			descr:    "const group",
-			filter:   filter("C1", "C2"),
+			filter:   filter("C1"),
 			original: "package x; const (C1 int = 1; C2 int = 2)",
-			want:     "package x; const (_ int = 1; _ int = 2)",
+			want: "package x\n" +
+				"// const C1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
+				"const (C2 int = 2)",
 		},
 		{
 			descr:    "single type",
 			filter:   filter("T1"),
 			original: "package x; type T1 int; type T2 bool",
-			want:     "package x; type T2 bool",
+			want: "package x\n" +
+				"// type T1 <abbreviated> — GopherJS replacement at example.go:1:11\n\n" +
+				"type T2 bool",
 		},
 		{
-			descr:    "const group",
+			descr:    "multiline type",
+			filter:   filter("T1"),
+			original: "package x; type T1 struct {A int; B int; C string;}",
+			want: "package x;\n" +
+				"// type T1 <abbreviated> — GopherJS replacement at example.go:1:11",
+		},
+		{
+			descr:    "type group",
 			filter:   filter("T1", "T2"),
 			original: "package x; type (T1 int; T2 bool)",
-			want:     "package x;",
+			want: "package x\n" +
+				"// type T1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
+				"// type T2 <abbreviated> — GopherJS replacement at example.go:1:11",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.descr, func(t *testing.T) {
-			fset := token.NewFileSet()
+			fset := test.filter.FileSet
 
-			f := parse(t, fset, test.original)
+			f := parse(t, fset, gofmt(t, test.original))
 			test.filter.Prune(f)
 			got := reconstruct(t, fset, f)
 
-			if diff := cmp.Diff(reformat(t, test.want), got); diff != "" {
+			if diff := diff.Diff(gofmt(t, test.want), got); diff != "" {
 				t.Errorf("SymbolFilter.Prune() returned diff (-want,+got):\n%s", diff)
 			}
 		})
@@ -158,7 +210,7 @@ func reconstruct(t *testing.T, fset *token.FileSet, f *ast.File) string {
 	return buf.String()
 }
 
-func reformat(t *testing.T, src string) string {
+func gofmt(t *testing.T, src string) string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f := parse(t, fset, src)

@@ -6,6 +6,7 @@ require (
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/google/go-cmp v0.5.5
 	github.com/kisielk/gotool v1.0.0
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/neelance/astrewrite v0.0.0-20160511093645-99348263ae86
 	github.com/neelance/sourcemap v0.0.0-20200213170602-2833bce08e4c
 	github.com/shurcooL/go v0.0.0-20200502201357-93f07166e636

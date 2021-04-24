@@ -2,6 +2,7 @@ package goroot
 
 import (
 	"fmt"
+	"go/token"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -92,11 +93,13 @@ func (m *gorootMerger) augmentPackage(dir string, vanilla []os.FileInfo, overlay
 	// Phase 1: Collect the list of symbols we will be replacing and write out
 	// our augmentation source files into the merged GOROOT.
 
-	sf := SymbolFilter{}
+	sf := SymbolFilter{
+		FileSet: token.NewFileSet(),
+	}
 	for _, n := range overlay {
 		loadPath := filepath.Join(overlayDir, n.Name())
 		writePath := filepath.Join(mergedDir, "gopherjs__"+n.Name()) // Avoid conflicts with original sources.
-		if err := processSource(m.overlayFS, loadPath, writePath, sf.Collect); err != nil {
+		if err := sf.processSource(m.overlayFS, loadPath, writePath, sf.Collect); err != nil {
 			return fmt.Errorf("failed to process augmentation source %q: %w", loadPath, err)
 		}
 	}
@@ -114,7 +117,7 @@ func (m *gorootMerger) augmentPackage(dir string, vanilla []os.FileInfo, overlay
 		loadPath := filepath.Join(dir, o.Name())
 		writePath := filepath.Join(mergedDir, o.Name())
 		// TODO: Add transformer that would replace sync → nosync for certain packages.
-		if err := processSource(loadFS, loadPath, writePath, sf.Prune); err != nil {
+		if err := sf.processSource(loadFS, loadPath, writePath, sf.Prune); err != nil {
 			return fmt.Errorf("failed to process original source %q: %w", loadPath, err)
 		}
 	}

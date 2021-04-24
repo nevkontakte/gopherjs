@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 )
@@ -24,9 +25,16 @@ const ioBufSize = 10 * 1024 // 10 KiB
 // SymbolFilter implements logic that gathers symbol names from the overlay
 // sources and then prunes their counterparts from the upstream sources, thus
 // prevending conflicting symbol definitions.
-type SymbolFilter map[string]bool
+//
+// TODO(nevkontakte): Include package name into the symbol key.
+type SymbolFilter struct {
+	// FileSet that was used to parse files the filter will be working with.
+	FileSet *token.FileSet
+	// Mapping of symbol names to positions where they were found.
+	WillPrune map[string]token.Pos
+}
 
-func (sf SymbolFilter) funcName(d *ast.FuncDecl) string {
+func (sf *SymbolFilter) funcName(d *ast.FuncDecl) string {
 	if d.Recv == nil || len(d.Recv.List) == 0 {
 		return d.Name.Name
 	}
@@ -37,38 +45,98 @@ func (sf SymbolFilter) funcName(d *ast.FuncDecl) string {
 	return recv.(*ast.Ident).Name + "." + d.Name.Name
 }
 
-// traverse top-level symbols within the file and prune top-level symbols for which keep() returned
-// false.
+// Collect names of top-level symbols in the source file. Doesn't modify the
+// file itself and always returns false.
+func (sf *SymbolFilter) Collect(f *ast.File) bool {
+	if sf.WillPrune == nil {
+		sf.WillPrune = map[string]token.Pos{}
+	}
+	collectName := func(c *astutil.Cursor) bool {
+		switch d := c.Node().(type) {
+		case *ast.File: // Root node.
+			return true
+		case *ast.GenDecl: // Import, const, var or type declaration, child of *ast.File.
+			return d.Tok != token.IMPORT
+		case *ast.ValueSpec: // Const or var spec, child of *ast.GenDecl.
+			for _, name := range d.Names {
+				sf.WillPrune[name.Name] = name.Pos()
+			}
+		case *ast.TypeSpec: // Type spec, child of *ast.GenDecl.
+			sf.WillPrune[d.Name.Name] = d.Pos()
+		case *ast.FuncDecl: // Function or method declaration, child of *ast.File.
+			sf.WillPrune[sf.funcName(d)] = d.Pos()
+		}
+		return false // By default, don't traverse child nodes.
+	}
+	astutil.Apply(f, collectName, nil)
+	return false
+}
+
+// Prune in-place top-level symbols with names that match previously collected.
 //
-// This function is functionally very similar to ast.FilterFile with two differences: it doesn't
-// descend into interface methods and struct fields, and it preserves imports.
-func (sf SymbolFilter) traverse(f *ast.File, keep func(name string) bool) bool {
+// For each pruned symbol adds a comment naming the sympol and referencing a
+// place where the replacement is. Returns true if any modifications were made.
+func (sf *SymbolFilter) Prune(f *ast.File) bool {
+	if sf.IsEmpty() {
+		return false // Empty filter won't prune anything.
+	}
 	pruned := false
 	visitNode := func(c *astutil.Cursor) bool {
 		switch d := c.Node().(type) {
 		case *ast.File: // Root node.
 			return true
+		case *ast.GenDecl: // Import, const, var or type declaration, child of *ast.File.
+			return d.Tok != token.IMPORT
 		case *ast.FuncDecl: // Function or method declaration, child of *ast.File.
-			if !keep(sf.funcName(d)) {
+			if pos, ok := sf.WillPrune[sf.funcName(d)]; ok {
+				f.Comments = append(f.Comments, sf.placeholder(&ast.FuncDecl{
+					Name: d.Name,
+					Recv: d.Recv,
+					Type: d.Type,
+				}, d.Pos(), pos))
 				c.Delete()
 				pruned = true
 			}
-		case *ast.GenDecl: // Import, const, var or type declaration, child of *ast.File.
-			return d.Tok != token.IMPORT
 		case *ast.ValueSpec: // Const or var spec, child of *ast.GenDecl.
+			parent := c.Parent().(*ast.GenDecl)
+			remaining := len(d.Names)
+			// Var and const declarations may have multiple names, for example:
+			// `var a, b = foo()`. Process them individually.
 			for i, name := range d.Names {
-				if !keep(name.Name) {
-					// Deleting variable/const declarations is somewhat fiddly (need to keep many different
-					// slices inside of *ast.ValueSpec in sync), so we simply rename it to "_", so that the
-					// compiler will dimply ignore it.
-					// TODO(nevkontakte): This will impact dead-code elimination if there's a non-trivial
-					// initializer try to implement true deletion.
+				if pos, ok := sf.WillPrune[name.Name]; ok {
+					f.Comments = append(f.Comments, sf.placeholder(&ast.GenDecl{
+						Tok: parent.Tok,
+						Specs: []ast.Spec{&ast.ValueSpec{
+							Names: []*ast.Ident{d.Names[i]},
+							Type:  ast.NewIdent("<abbreviated>"),
+						}},
+						TokPos: parent.TokPos,
+					}, c.Parent().Pos()-1, pos))
+
+					// Deleting individual var/const names from a declaration is unsafe,
+					// since they need to be kept in sync with initialization exprs.
+					// In that case we simply rename the variable to '_', which the compiler
+					// will ignore.
 					d.Names[i] = ast.NewIdent("_")
+					remaining--
 					pruned = true
 				}
 			}
+			// If all names were removed, we can delete the whole ValueSpec and avoid
+			// initialization expression pinning potentially dead code.
+			if remaining == 0 {
+				c.Delete()
+			}
 		case *ast.TypeSpec: // Type spec, child of *ast.GenDecl.
-			if !keep(d.Name.Name) {
+			if pos, ok := sf.WillPrune[d.Name.Name]; ok {
+				f.Comments = append(f.Comments, sf.placeholder(&ast.GenDecl{
+					Tok: token.TYPE,
+					Specs: []ast.Spec{&ast.TypeSpec{
+						Name: d.Name,
+						Type: ast.NewIdent("<abbreviated>"),
+					}},
+					TokPos: c.Parent().Pos(),
+				}, c.Parent().Pos()-1, pos))
 				c.Delete()
 				pruned = true
 			}
@@ -91,32 +159,42 @@ func (sf SymbolFilter) traverse(f *ast.File, keep func(name string) bool) bool {
 	return pruned
 }
 
-// Collect names of top-level symbols in the source file. Doesn't modify the file itself and always returns false.
-func (sf SymbolFilter) Collect(f *ast.File) bool {
-	return sf.traverse(f, func(name string) bool {
-		sf[name] = true
-		return true
-	})
-}
-
-// Prune in-place top-level symbols with names that match previously collected. Returns true if any modifications were made.
-func (sf SymbolFilter) Prune(f *ast.File) bool {
-	if sf.IsEmpty() {
-		return false // Empty filter won't prune anything.
-	}
-	return sf.traverse(f, func(name string) bool {
-		return !sf[name]
-	})
-}
-
 // IsEmpty returns true if no symbols are going to be pruned by this filter.
-func (sf SymbolFilter) IsEmpty() bool { return len(sf) == 0 }
+func (sf *SymbolFilter) IsEmpty() bool { return len(sf.WillPrune) == 0 }
+
+var emptyFSet = token.NewFileSet()
+
+// placeholder generates a comment for a pruned AST node with a pointer to where the replacement is.
+func (sf *SymbolFilter) placeholder(n ast.Node, origPos, replPos token.Pos) *ast.CommentGroup {
+	buf := &strings.Builder{}
+	err := format.Node(buf, emptyFSet, n)
+	if err != nil {
+		// Should never happen.
+		panic(fmt.Errorf("failed to format AST node %v: %w", n, err))
+	}
+	// Just in case printed source ends up multi-line despite of the trimming above,
+	// make sure all lines are commented out.
+	str := strings.ReplaceAll(buf.String(), "\n", "\n// ")
+
+	return &ast.CommentGroup{
+		List: []*ast.Comment{{
+			Slash: origPos,
+			Text:  fmt.Sprintf("// %s — GopherJS replacement at %s", str, sf.position(replPos)),
+		}},
+	}
+}
+
+func (sf *SymbolFilter) position(pos token.Pos) token.Position {
+	if sf.FileSet == nil {
+		return token.Position{}
+	}
+	return sf.FileSet.Position(pos)
+}
 
 type astTransformer func(*ast.File) bool
 
-func processSource(loadFS http.FileSystem, loadPath, writePath string, processor astTransformer) error {
-	fset := token.NewFileSet()
-	source, err := loadAST(fset, loadFS, loadPath)
+func (sf *SymbolFilter) processSource(loadFS http.FileSystem, loadPath, writePath string, processor astTransformer) error {
+	source, err := loadAST(sf.FileSet, loadFS, loadPath, writePath)
 	if err != nil {
 		return fmt.Errorf("failed to load %q AST: %w", loadPath, err)
 	}
@@ -127,20 +205,20 @@ func processSource(loadFS http.FileSystem, loadPath, writePath string, processor
 		return copyUnmodified(loadFS, loadPath, writePath)
 	}
 
-	if err := writeAST(fset, writePath, source); err != nil {
+	if err := writeAST(sf.FileSet, writePath, source); err != nil {
 		return fmt.Errorf("failed to write %q: %w", writePath, err)
 	}
 	return nil
 }
 
-func loadAST(fset *token.FileSet, fs http.FileSystem, path string) (*ast.File, error) {
-	f, err := fs.Open(path)
+func loadAST(fset *token.FileSet, fs http.FileSystem, loadPath, writePath string) (*ast.File, error) {
+	f, err := fs.Open(loadPath)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	return parser.ParseFile(fset, filepath.Base(path), f, parser.ParseComments)
+	return parser.ParseFile(fset, filepath.Base(writePath), f, parser.ParseComments)
 }
 
 func writeAST(fset *token.FileSet, path string, source *ast.File) error {
