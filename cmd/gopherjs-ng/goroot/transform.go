@@ -44,35 +44,50 @@ func (sf SymbolFilter) funcName(d *ast.FuncDecl) string {
 // descend into interface methods and struct fields, and it preserves imports.
 func (sf SymbolFilter) traverse(f *ast.File, keep func(name string) bool) bool {
 	pruned := false
-	astutil.Apply(f, func(c *astutil.Cursor) bool {
+	visitNode := func(c *astutil.Cursor) bool {
 		switch d := c.Node().(type) {
 		case *ast.File: // Root node.
 			return true
-		case *ast.FuncDecl: // Child of *ast.File.
+		case *ast.FuncDecl: // Function or method declaration, child of *ast.File.
 			if !keep(sf.funcName(d)) {
 				c.Delete()
 				pruned = true
 			}
-		case *ast.GenDecl: // Child of *ast.File.
-			return c.Name() == "Decls"
-		case *ast.ValueSpec: // Child of *ast.GenDecl.
+		case *ast.GenDecl: // Import, const, var or type declaration, child of *ast.File.
+			return d.Tok != token.IMPORT
+		case *ast.ValueSpec: // Const or var spec, child of *ast.GenDecl.
 			for i, name := range d.Names {
 				if !keep(name.Name) {
 					// Deleting variable/const declarations is somewhat fiddly (need to keep many different
 					// slices inside of *ast.ValueSpec in sync), so we simply rename it to "_", so that the
 					// compiler will dimply ignore it.
+					// TODO(nevkontakte): This will impact dead-code elimination if there's a non-trivial
+					// initializer try to implement true deletion.
 					d.Names[i] = ast.NewIdent("_")
 					pruned = true
 				}
 			}
-		case *ast.TypeSpec: // Child of *ast.GenDecl.
+		case *ast.TypeSpec: // Type spec, child of *ast.GenDecl.
 			if !keep(d.Name.Name) {
 				c.Delete()
 				pruned = true
 			}
 		}
 		return false
-	}, nil)
+	}
+
+	pruneEmptyDecls := func(c *astutil.Cursor) bool {
+		d, ok := c.Node().(*ast.GenDecl)
+		if !ok {
+			return true
+		}
+		if len(d.Specs) == 0 {
+			// If all child const/var/type specs were deleted, remove the parent decl.
+			c.Delete()
+		}
+		return true
+	}
+	astutil.Apply(f, visitNode, pruneEmptyDecls)
 	return pruned
 }
 
