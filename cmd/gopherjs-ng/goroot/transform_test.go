@@ -131,7 +131,7 @@ func TestSymbolFilterPrune(t *testing.T) {
 
 			f := parse(t, fset, test.original)
 			test.filter.Prune(f)
-			got := format(t, fset, f)
+			got := reconstruct(t, fset, f)
 
 			if diff := cmp.Diff(reformat(t, test.want), got); diff != "" {
 				t.Errorf("SymbolFilter.Prune() returned diff (-want,+got):\n%s", diff)
@@ -149,7 +149,7 @@ func parse(t *testing.T, fset *token.FileSet, src string) *ast.File {
 	return f
 }
 
-func format(t *testing.T, fset *token.FileSet, f *ast.File) string {
+func reconstruct(t *testing.T, fset *token.FileSet, f *ast.File) string {
 	t.Helper()
 	buf := &strings.Builder{}
 	if err := printer.Fprint(buf, fset, f); err != nil {
@@ -162,5 +162,5 @@ func reformat(t *testing.T, src string) string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f := parse(t, fset, src)
-	return format(t, fset, f)
+	return reconstruct(t, fset, f)
 }

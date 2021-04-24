@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"io"
 	"net/http"
@@ -157,7 +157,7 @@ func writeAST(fset *token.FileSet, path string, source *ast.File) error {
 	bf := bufio.NewWriterSize(f, ioBufSize)
 	defer bf.Flush()
 
-	return printer.Fprint(bf, fset, source)
+	return format.Node(bf, fset, source)
 }
 
 func copyUnmodified(loadFS http.FileSystem, loadPath, writePath string) error {

@@ -1,3 +1,3 @@
 package vanilla
 
-func thisFunctionWillRemain()	{}
+func thisFunctionWillRemain() {}
