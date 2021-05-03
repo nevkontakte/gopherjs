@@ -13,6 +13,41 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// extraFilters contains a list of additional source file-level filters that
+// need to be applied to certain packages. The may is keyed with package import
+// paths and contains fileFilter functions that return the relevant subset of
+// source files.
+//
+// This kind of filtering is helpful, since it reduces the amount of code that
+// the overlay needs to deal with.
+//
+// TODO(nevkontakte): In theory, this should not be needed if we are using build
+// tags correctly.
+var extraFilters map[string]fileFilter = map[string]fileFilter{
+	"runtime":              includeOnly("typekind.go", "error.go"),
+	"runtime/internal/sys": includeOnly("zversion.go", "stubs.go", "zgoos_js.go", "arch.go"),
+	"runtime/pprof":        includeOnly(), // Exclude all vanilla sources.
+	"crypto/rand":          includeOnly("rand.go", "util.go"),
+}
+
+// nosyncPkgs lists stdlib packages, which can have their dependency on the
+// "sync" package replaced with GopherJS's "nosync". While exact reasons for
+// this has been lost to history, it is likely for performance reasons:
+// GopherJS runtime is inherently single-threaded and these packages probably
+// don't need the complexity of the actual sync package.
+var nosyncPkgs = map[string]struct{}{
+	"crypto/rand":   {},
+	"encoding/gob":  {},
+	"encoding/json": {},
+	"expvar":        {},
+	"go/token":      {},
+	"log":           {},
+	"math/big":      {},
+	"math/rand":     {},
+	"regexp":        {},
+	"time":          {},
+}
+
 // gorootMerger traverses both vanilla overlay GOROOT sources and generates a
 // merged version in the specified directory.
 //
@@ -86,9 +121,10 @@ func (m *gorootMerger) dir(dir string) error {
 
 // augmentPackage processes sources in the given GOROOT directory and generates
 // a GopherJS-compatible version in the corresponding merged GOROOT subdirectory.
-func (m *gorootMerger) augmentPackage(importPath string, vanilla []os.FileInfo, overlay []os.FileInfo) error {
-	mergedDir := path.Join(m.mergedRoot, importPath)
-	overlayDir := path.Clean(path.Join("/", importPath))
+func (m *gorootMerger) augmentPackage(dir string, vanilla []os.FileInfo, overlay []os.FileInfo) error {
+	mergedDir := path.Join(m.mergedRoot, dir)
+	overlayDir := path.Clean(path.Join("/", dir))
+	importPath := strings.TrimPrefix(dir, "src/")
 
 	// Phase 1: Collect the list of symbols we will be replacing and write out
 	// our augmentation source files into the merged GOROOT.
@@ -112,12 +148,17 @@ func (m *gorootMerger) augmentPackage(importPath string, vanilla []os.FileInfo, 
 
 	// Phase 3: Process the remaining original sources, prune augmented symbols
 	// and write them out into the virtual GOROOT.
+	transformer := astTransformer(sf.Prune)
+	if _, ok := nosyncPkgs[importPath]; ok {
+		transformer = transformer.chain(nosync)
+	}
+
 	for _, o := range vanilla {
 		vanillaFS := http.Dir(m.vanillaRoot) // Read from the real file system.
-		loadPath := filepath.Join(importPath, o.Name())
+		loadPath := filepath.Join(dir, o.Name())
 		writePath := filepath.Join(mergedDir, o.Name())
 		// TODO: Add transformer that would replace sync → nosync for certain packages.
-		if err := processSource(fset, vanillaFS, loadPath, writePath, sf.Prune); err != nil {
+		if err := processSource(fset, vanillaFS, loadPath, writePath, transformer); err != nil {
 			return fmt.Errorf("failed to process original source %q: %w", loadPath, err)
 		}
 	}
@@ -176,22 +217,6 @@ func includeOnly(names ...string) fileFilter {
 		}
 		return out
 	}
-}
-
-// extraFilters contains a list of additional source file-level filters that
-// need to be applied to certain packages. The may is keyed with package import
-// paths and contains fileFilter functions that return the relevant subset of
-// source files.
-//
-// This kind of filtering is helpful, since it reduces the amount of code that
-// the overlay needs to deal with.
-//
-// TODO: In theory, this should not be needed if we are using build tags correctly.
-var extraFilters map[string]fileFilter = map[string]fileFilter{
-	"runtime":              includeOnly("typekind.go", "error.go"),
-	"runtime/internal/sys": includeOnly("zversion.go", "stubs.go", "zgoos_js.go", "arch.go"),
-	"runtime/pprof":        includeOnly(), // Exclude all vanilla sources.
-	"crypto/rand":          includeOnly("rand.go", "util.go"),
 }
 
 func abs(p string) string {

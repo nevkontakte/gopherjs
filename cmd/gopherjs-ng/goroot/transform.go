@@ -15,7 +15,22 @@ import (
 
 const ioBufSize = 10 * 1024 // 10 KiB
 
+// astTransformer processes file AST and makes any modifications in-place. If any
+// modifications were made, it must return true.
 type astTransformer func(fset *token.FileSet, f *ast.File) bool
+
+// chain two transformers to be invoked one after another. The resulting
+// transformer will return true if either of its components made any modifications.
+func (left astTransformer) chain(right astTransformer) astTransformer {
+	return func(fset *token.FileSet, f *ast.File) bool {
+		modified := left(fset, f)
+		modified = modified || right(fset, f)
+		return modified
+	}
+}
+
+// identity is a trivial astTransformer that does nothing.
+func identity(*token.FileSet, *ast.File) bool { return false }
 
 func processSource(fset *token.FileSet, loadFS http.FileSystem, loadPath, writePath string, transform astTransformer) error {
 	source, err := loadAST(fset, loadFS, loadPath, writePath)
