@@ -45,6 +45,11 @@ func (a *augmenter) Collect(fset *token.FileSet, f *ast.File) bool {
 		case *ast.TypeSpec: // Type spec, child of *ast.GenDecl.
 			a.Replacements[a.key(f, node)] = node.Pos()
 		case *ast.FuncDecl: // Function or method declaration, child of *ast.File.
+			if node.Name.Name == "init" {
+				// init() functions are special and there can be several of them.
+				// don't replace them.
+				return false
+			}
 			a.Replacements[a.key(f, node)] = node.Pos()
 		}
 		return false // By default, don't traverse child nodes.

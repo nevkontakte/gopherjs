@@ -53,6 +53,10 @@ var nosyncPkgs = map[string]struct{}{
 //
 // The resulting directory can be used as GOROOT for GopherJS builds and should
 // be for the most part compatible with any normal Go tooling.
+//
+// TODO(nevkontakte): Currently merger is unaware of build constraints and
+// things like symbol replacement may bleed from one platform into another.
+// I don't think this is a problem, but worth keeping in mind.
 type gorootMerger struct {
 	overlayFS   http.FileSystem
 	vanillaRoot string
