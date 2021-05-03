@@ -86,9 +86,9 @@ func (m *gorootMerger) dir(dir string) error {
 
 // augmentPackage processes sources in the given GOROOT directory and generates
 // a GopherJS-compatible version in the corresponding merged GOROOT subdirectory.
-func (m *gorootMerger) augmentPackage(dir string, vanilla []os.FileInfo, overlay []os.FileInfo) error {
-	mergedDir := path.Join(m.mergedRoot, dir)
-	overlayDir := path.Clean(path.Join("/", dir))
+func (m *gorootMerger) augmentPackage(importPath string, vanilla []os.FileInfo, overlay []os.FileInfo) error {
+	mergedDir := path.Join(m.mergedRoot, importPath)
+	overlayDir := path.Clean(path.Join("/", importPath))
 
 	// Phase 1: Collect the list of symbols we will be replacing and write out
 	// our augmentation source files into the merged GOROOT.
@@ -106,18 +106,18 @@ func (m *gorootMerger) augmentPackage(dir string, vanilla []os.FileInfo, overlay
 
 	// Phase 2: Filter the list of vanilla sources at file level.
 	vanilla = onlyGoSources(vanilla) // GopherJS doesn't support Assembly.
-	if filter, ok := extraFilters[dir]; ok {
+	if filter, ok := extraFilters[importPath]; ok {
 		vanilla = filter(vanilla)
 	}
 
 	// Phase 3: Process the remaining original sources, prune augmented symbols
 	// and write them out into the virtual GOROOT.
 	for _, o := range vanilla {
-		loadFS := http.Dir(m.vanillaRoot) // Read from the real file system.
-		loadPath := filepath.Join(dir, o.Name())
+		vanillaFS := http.Dir(m.vanillaRoot) // Read from the real file system.
+		loadPath := filepath.Join(importPath, o.Name())
 		writePath := filepath.Join(mergedDir, o.Name())
 		// TODO: Add transformer that would replace sync → nosync for certain packages.
-		if err := processSource(fset, loadFS, loadPath, writePath, sf.Prune); err != nil {
+		if err := processSource(fset, vanillaFS, loadPath, writePath, sf.Prune); err != nil {
 			return fmt.Errorf("failed to process original source %q: %w", loadPath, err)
 		}
 	}
