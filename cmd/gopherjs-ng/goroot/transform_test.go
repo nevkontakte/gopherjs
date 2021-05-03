@@ -42,7 +42,7 @@ type SomeAlias = SomeType
 func TestSymbolFilterCollect(t *testing.T) {
 	f := parse(t, token.NewFileSet(), exampleSource)
 
-	sf := SymbolFilter{}
+	sf := symbolFilter{}
 	sf.Collect(f)
 
 	keys := []string{}
@@ -66,10 +66,10 @@ func TestSymbolFilterCollect(t *testing.T) {
 }
 
 func TestSymbolFilterPrune(t *testing.T) {
-	filter := func(names ...string) SymbolFilter {
+	filter := func(names ...string) symbolFilter {
 		fset := token.NewFileSet()
 		f := fset.AddFile("example.go", fset.Base(), 42)
-		sf := SymbolFilter{
+		sf := symbolFilter{
 			FileSet:   fset,
 			WillPrune: map[string]token.Pos{},
 		}
@@ -81,7 +81,7 @@ func TestSymbolFilterPrune(t *testing.T) {
 
 	tests := []struct {
 		descr    string
-		filter   SymbolFilter
+		filter   symbolFilter
 		original string
 		want     string
 	}{

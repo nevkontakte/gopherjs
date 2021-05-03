@@ -18,21 +18,21 @@ import (
 
 const ioBufSize = 10 * 1024 // 10 KiB
 
-// SymbolFilter implements top-level symbol pruning for augmented packages.
+// symbolFilter implements top-level symbol pruning for augmented packages.
 //
 // GopherJS standard library augmentations are done at the top-level symbol
 // level, which allows to only keep a minimal subset of the code forked.
-// SymbolFilter implements logic that gathers symbol names from the overlay
+// symbolFilter implements logic that gathers symbol names from the overlay
 // sources and then prunes their counterparts from the upstream sources, thus
 // prevending conflicting symbol definitions.
-type SymbolFilter struct {
+type symbolFilter struct {
 	// FileSet that was used to parse files the filter will be working with.
 	FileSet *token.FileSet
 	// Mapping of symbol names to positions where they were found.
 	WillPrune map[string]token.Pos
 }
 
-func (sf *SymbolFilter) funcName(d *ast.FuncDecl) string {
+func (sf *symbolFilter) funcName(d *ast.FuncDecl) string {
 	if d.Recv == nil || len(d.Recv.List) == 0 {
 		return d.Name.Name
 	}
@@ -46,7 +46,7 @@ func (sf *SymbolFilter) funcName(d *ast.FuncDecl) string {
 // key generates a key for a named symbol that is used to detect, which original
 // symbols are to be replaced with an augmentation. Keys are prefixed with file's
 // package name in order to distinguish between somepackage and somepackage_test.
-func (sf *SymbolFilter) key(f *ast.File, n ast.Node) string {
+func (sf *symbolFilter) key(f *ast.File, n ast.Node) string {
 	switch n := n.(type) {
 	case *ast.TypeSpec:
 		return f.Name.Name + "." + n.Name.Name
@@ -61,7 +61,7 @@ func (sf *SymbolFilter) key(f *ast.File, n ast.Node) string {
 
 // Collect names of top-level symbols in the source file. Doesn't modify the
 // file itself and always returns false.
-func (sf *SymbolFilter) Collect(f *ast.File) bool {
+func (sf *symbolFilter) Collect(f *ast.File) bool {
 	if sf.WillPrune == nil {
 		sf.WillPrune = map[string]token.Pos{}
 	}
@@ -90,7 +90,7 @@ func (sf *SymbolFilter) Collect(f *ast.File) bool {
 //
 // For each pruned symbol adds a comment naming the sympol and referencing a
 // place where the replacement is. Returns true if any modifications were made.
-func (sf *SymbolFilter) Prune(f *ast.File) bool {
+func (sf *symbolFilter) Prune(f *ast.File) bool {
 	if sf.IsEmpty() {
 		return false // Empty filter won't prune anything.
 	}
@@ -174,12 +174,12 @@ func (sf *SymbolFilter) Prune(f *ast.File) bool {
 }
 
 // IsEmpty returns true if no symbols are going to be pruned by this filter.
-func (sf *SymbolFilter) IsEmpty() bool { return len(sf.WillPrune) == 0 }
+func (sf *symbolFilter) IsEmpty() bool { return len(sf.WillPrune) == 0 }
 
 var emptyFSet = token.NewFileSet()
 
 // placeholder generates a comment for a pruned AST node with a pointer to where the replacement is.
-func (sf *SymbolFilter) placeholder(n ast.Node, origPos, replPos token.Pos) *ast.CommentGroup {
+func (sf *symbolFilter) placeholder(n ast.Node, origPos, replPos token.Pos) *ast.CommentGroup {
 	buf := &strings.Builder{}
 	err := format.Node(buf, emptyFSet, n)
 	if err != nil {
@@ -198,7 +198,7 @@ func (sf *SymbolFilter) placeholder(n ast.Node, origPos, replPos token.Pos) *ast
 	}
 }
 
-func (sf *SymbolFilter) position(pos token.Pos) token.Position {
+func (sf *symbolFilter) position(pos token.Pos) token.Position {
 	if sf.FileSet == nil {
 		return token.Position{}
 	}
@@ -207,7 +207,7 @@ func (sf *SymbolFilter) position(pos token.Pos) token.Position {
 
 type astTransformer func(*ast.File) bool
 
-func (sf *SymbolFilter) processSource(loadFS http.FileSystem, loadPath, writePath string, processor astTransformer) error {
+func (sf *symbolFilter) ProcessSource(loadFS http.FileSystem, loadPath, writePath string, processor astTransformer) error {
 	source, err := loadAST(sf.FileSet, loadFS, loadPath, writePath)
 	if err != nil {
 		return fmt.Errorf("failed to load %q AST: %w", loadPath, err)
