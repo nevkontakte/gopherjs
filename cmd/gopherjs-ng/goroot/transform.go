@@ -25,8 +25,6 @@ const ioBufSize = 10 * 1024 // 10 KiB
 // SymbolFilter implements logic that gathers symbol names from the overlay
 // sources and then prunes their counterparts from the upstream sources, thus
 // prevending conflicting symbol definitions.
-//
-// TODO(nevkontakte): Include package name into the symbol key.
 type SymbolFilter struct {
 	// FileSet that was used to parse files the filter will be working with.
 	FileSet *token.FileSet
@@ -45,6 +43,22 @@ func (sf *SymbolFilter) funcName(d *ast.FuncDecl) string {
 	return recv.(*ast.Ident).Name + "." + d.Name.Name
 }
 
+// key generates a key for a named symbol that is used to detect, which original
+// symbols are to be replaced with an augmentation. Keys are prefixed with file's
+// package name in order to distinguish between somepackage and somepackage_test.
+func (sf *SymbolFilter) key(f *ast.File, n ast.Node) string {
+	switch n := n.(type) {
+	case *ast.TypeSpec:
+		return f.Name.Name + "." + n.Name.Name
+	case *ast.FuncDecl:
+		return f.Name.Name + "." + sf.funcName(n)
+	case *ast.Ident: // For top-level variables and constants.
+		return f.Name.Name + "." + n.Name
+	default:
+		panic(fmt.Errorf("AST node %v is not supported by SymbolFilter", n))
+	}
+}
+
 // Collect names of top-level symbols in the source file. Doesn't modify the
 // file itself and always returns false.
 func (sf *SymbolFilter) Collect(f *ast.File) bool {
@@ -52,19 +66,19 @@ func (sf *SymbolFilter) Collect(f *ast.File) bool {
 		sf.WillPrune = map[string]token.Pos{}
 	}
 	collectName := func(c *astutil.Cursor) bool {
-		switch d := c.Node().(type) {
+		switch node := c.Node().(type) {
 		case *ast.File: // Root node.
 			return true
 		case *ast.GenDecl: // Import, const, var or type declaration, child of *ast.File.
-			return d.Tok != token.IMPORT
+			return node.Tok != token.IMPORT
 		case *ast.ValueSpec: // Const or var spec, child of *ast.GenDecl.
-			for _, name := range d.Names {
-				sf.WillPrune[name.Name] = name.Pos()
+			for _, name := range node.Names {
+				sf.WillPrune[sf.key(f, name)] = name.Pos()
 			}
 		case *ast.TypeSpec: // Type spec, child of *ast.GenDecl.
-			sf.WillPrune[d.Name.Name] = d.Pos()
+			sf.WillPrune[sf.key(f, node)] = node.Pos()
 		case *ast.FuncDecl: // Function or method declaration, child of *ast.File.
-			sf.WillPrune[sf.funcName(d)] = d.Pos()
+			sf.WillPrune[sf.key(f, node)] = node.Pos()
 		}
 		return false // By default, don't traverse child nodes.
 	}
@@ -82,32 +96,32 @@ func (sf *SymbolFilter) Prune(f *ast.File) bool {
 	}
 	pruned := false
 	visitNode := func(c *astutil.Cursor) bool {
-		switch d := c.Node().(type) {
+		switch node := c.Node().(type) {
 		case *ast.File: // Root node.
 			return true
 		case *ast.GenDecl: // Import, const, var or type declaration, child of *ast.File.
-			return d.Tok != token.IMPORT
+			return node.Tok != token.IMPORT
 		case *ast.FuncDecl: // Function or method declaration, child of *ast.File.
-			if pos, ok := sf.WillPrune[sf.funcName(d)]; ok {
+			if pos, ok := sf.WillPrune[sf.key(f, node)]; ok {
 				f.Comments = append(f.Comments, sf.placeholder(&ast.FuncDecl{
-					Name: d.Name,
-					Recv: d.Recv,
-					Type: d.Type,
-				}, d.Pos(), pos))
+					Name: node.Name,
+					Recv: node.Recv,
+					Type: node.Type,
+				}, node.Pos(), pos))
 				c.Delete()
 				pruned = true
 			}
 		case *ast.ValueSpec: // Const or var spec, child of *ast.GenDecl.
 			parent := c.Parent().(*ast.GenDecl)
-			remaining := len(d.Names)
+			remaining := len(node.Names)
 			// Var and const declarations may have multiple names, for example:
 			// `var a, b = foo()`. Process them individually.
-			for i, name := range d.Names {
-				if pos, ok := sf.WillPrune[name.Name]; ok {
+			for i, name := range node.Names {
+				if pos, ok := sf.WillPrune[sf.key(f, name)]; ok {
 					f.Comments = append(f.Comments, sf.placeholder(&ast.GenDecl{
 						Tok: parent.Tok,
 						Specs: []ast.Spec{&ast.ValueSpec{
-							Names: []*ast.Ident{d.Names[i]},
+							Names: []*ast.Ident{node.Names[i]},
 							Type:  ast.NewIdent("<abbreviated>"),
 						}},
 						TokPos: parent.TokPos,
@@ -117,7 +131,7 @@ func (sf *SymbolFilter) Prune(f *ast.File) bool {
 					// since they need to be kept in sync with initialization exprs.
 					// In that case we simply rename the variable to '_', which the compiler
 					// will ignore.
-					d.Names[i] = ast.NewIdent("_")
+					node.Names[i] = ast.NewIdent("_")
 					remaining--
 					pruned = true
 				}
@@ -128,11 +142,11 @@ func (sf *SymbolFilter) Prune(f *ast.File) bool {
 				c.Delete()
 			}
 		case *ast.TypeSpec: // Type spec, child of *ast.GenDecl.
-			if pos, ok := sf.WillPrune[d.Name.Name]; ok {
+			if pos, ok := sf.WillPrune[sf.key(f, node)]; ok {
 				f.Comments = append(f.Comments, sf.placeholder(&ast.GenDecl{
 					Tok: token.TYPE,
 					Specs: []ast.Spec{&ast.TypeSpec{
-						Name: d.Name,
+						Name: node.Name,
 						Type: ast.NewIdent("<abbreviated>"),
 					}},
 					TokPos: c.Parent().Pos(),

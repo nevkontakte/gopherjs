@@ -5,11 +5,11 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/kylelemons/godebug/diff"
 )
 
@@ -45,20 +45,23 @@ func TestSymbolFilterCollect(t *testing.T) {
 	sf := SymbolFilter{}
 	sf.Collect(f)
 
-	want := SymbolFilter{
-		WillPrune: map[string]token.Pos{
-			"SomeFunc":            token.NoPos,
-			"SomeType":            token.NoPos,
-			"SomeType.SomeMethod": token.NoPos,
-			"SomeVar":             token.NoPos,
-			"SomeConst":           token.NoPos,
-			"SomeIface":           token.NoPos,
-			"SomeAlias":           token.NoPos,
-		},
+	keys := []string{}
+	for k := range sf.WillPrune {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	want := []string{
+		"example.SomeAlias",
+		"example.SomeConst",
+		"example.SomeFunc",
+		"example.SomeIface",
+		"example.SomeType",
+		"example.SomeType.SomeMethod",
+		"example.SomeVar",
 	}
 
-	if diff := cmp.Diff(want, sf, cmpopts.IgnoreTypes(token.NoPos)); diff != "" {
-		t.Errorf("SymbolFilter.Collect() returned diff (-want,+got):\n%s", diff)
+	if diff := cmp.Diff(want, keys); diff != "" {
+		t.Errorf("SymbolFilter.Collect() symbol keys differ from expected (-want,+got):\n%s", diff)
 	}
 }
 
@@ -84,31 +87,31 @@ func TestSymbolFilterPrune(t *testing.T) {
 	}{
 		{
 			descr:    "smoke",
-			filter:   filter("SomeFunc", "SomeType.SomeMethod"),
+			filter:   filter("example.SomeFunc", "example.SomeType.SomeMethod"),
 			original: exampleSource,
 			want:     prunedSource,
 		},
 		{
 			descr:    "func",
-			filter:   filter("Func"),
+			filter:   filter("x.Func"),
 			original: "package x; func Func() {}; func OtherFunc() {}",
 			want:     "package x\n// func Func() — GopherJS replacement at example.go:1:11\nfunc OtherFunc() {}",
 		},
 		{
 			descr:    "method",
-			filter:   filter("T.M"),
+			filter:   filter("x.T.M"),
 			original: "package x; type T int; func (T) M() {}",
 			want:     "package x; type T int\n // func (T) M() — GopherJS replacement at example.go:1:11",
 		},
 		{
 			descr:    "single var",
-			filter:   filter("V"),
+			filter:   filter("x.V"),
 			original: "package x; var V int = 1",
 			want:     "package x\n// var V <abbreviated> — GopherJS replacement at example.go:1:11",
 		},
 		{
 			descr:    "var group partial",
-			filter:   filter("V1"),
+			filter:   filter("x.V1"),
 			original: "package x; var (V1 int; V2 int)",
 			want: "package x\n" +
 				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
@@ -116,7 +119,7 @@ func TestSymbolFilterPrune(t *testing.T) {
 		},
 		{
 			descr:    "var group",
-			filter:   filter("V1", "V2"),
+			filter:   filter("x.V1", "x.V2"),
 			original: "package x; var (V1 int; V2 int)",
 			want: "package x\n" +
 				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
@@ -124,7 +127,7 @@ func TestSymbolFilterPrune(t *testing.T) {
 		},
 		{
 			descr:    "multi var partial",
-			filter:   filter("V1"),
+			filter:   filter("x.V1"),
 			original: "package x; func F() (int, int) {return 1, 2}; var V1, V2 = F()",
 			want: "package x; func F() (int, int) {return 1, 2}\n" +
 				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
@@ -132,7 +135,7 @@ func TestSymbolFilterPrune(t *testing.T) {
 		},
 		{
 			descr:    "multi var",
-			filter:   filter("V1", "V2"),
+			filter:   filter("x.V1", "x.V2"),
 			original: "package x; func F() (int, int) {return 1, 2}; var V1, V2 = F()",
 			want: "package x; func F() (int, int) {return 1, 2}\n" +
 				"// var V1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
@@ -140,13 +143,13 @@ func TestSymbolFilterPrune(t *testing.T) {
 		},
 		{
 			descr:    "single const",
-			filter:   filter("C"),
+			filter:   filter("x.C"),
 			original: "package x; const C int = 1",
 			want:     "package x\n// const C <abbreviated> — GopherJS replacement at example.go:1:11",
 		},
 		{
 			descr:    "const group",
-			filter:   filter("C1"),
+			filter:   filter("x.C1"),
 			original: "package x; const (C1 int = 1; C2 int = 2)",
 			want: "package x\n" +
 				"// const C1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
@@ -154,7 +157,7 @@ func TestSymbolFilterPrune(t *testing.T) {
 		},
 		{
 			descr:    "single type",
-			filter:   filter("T1"),
+			filter:   filter("x.T1"),
 			original: "package x; type T1 int; type T2 bool",
 			want: "package x\n" +
 				"// type T1 <abbreviated> — GopherJS replacement at example.go:1:11\n\n" +
@@ -162,14 +165,14 @@ func TestSymbolFilterPrune(t *testing.T) {
 		},
 		{
 			descr:    "multiline type",
-			filter:   filter("T1"),
+			filter:   filter("x.T1"),
 			original: "package x; type T1 struct {A int; B int; C string;}",
 			want: "package x;\n" +
 				"// type T1 <abbreviated> — GopherJS replacement at example.go:1:11",
 		},
 		{
 			descr:    "type group",
-			filter:   filter("T1", "T2"),
+			filter:   filter("x.T1", "x.T2"),
 			original: "package x; type (T1 int; T2 bool)",
 			want: "package x\n" +
 				"// type T1 <abbreviated> — GopherJS replacement at example.go:1:11\n" +
