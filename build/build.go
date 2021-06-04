@@ -59,8 +59,8 @@ func NewBuildContext(installSuffix string, buildTags []string) *build.Context {
 	return &build.Context{
 		GOROOT:        DefaultGOROOT,
 		GOPATH:        build.Default.GOPATH,
-		GOOS:          build.Default.GOOS,
-		GOARCH:        "js",
+		GOOS:          "js",
+		GOARCH:        "ecmascript",
 		InstallSuffix: installSuffix,
 		Compiler:      "gc",
 		BuildTags: append(buildTags,
@@ -145,15 +145,7 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 	// bctx is passed by value, so it can be modified here.
 	var isVirtual bool
 	switch path {
-	case "syscall":
-		// syscall needs to use a typical GOARCH like amd64 to pick up definitions for _Socklen, BpfInsn, IFNAMSIZ, Timeval, BpfStat, SYS_FCNTL, Flock_t, etc.
-		bctx.GOARCH = "wasm"
-		bctx.GOOS = "js"
-		bctx.InstallSuffix = "js"
-		if installSuffix != "" {
-			bctx.InstallSuffix += "_" + installSuffix
-		}
-	case "syscall/js":
+	case "syscall/js", "internal/syscall/unix":
 		// There are no buildable files in this package, but we need to use files in the virtual directory.
 		mode |= build.FindOnly
 	case "math/big":
@@ -180,7 +172,11 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 		// and darwin.
 		// In the long term, our builds should produce the same output regardless
 		// of the host OS: https://github.com/gopherjs/gopherjs/issues/693.
-		pkg.GoFiles = exclude(pkg.GoFiles, "dirent_js.go")
+		// pkg.GoFiles = exclude(pkg.GoFiles, "dirent_js.go")
+		pkg.GoFiles = include(pkg.GoFiles, "dir_unix.go", "error_posix.go", "exec_posix.go", "exec_unix.go", "file_posix.go", "file_unix.go", "path_unix.go", "pipe_bsd.go", "stat_js.go", "stat_unix.go", "sticky_bsd.go", "sys_bsd.go", "sys_js.go", "wait_unimp.go")
+		pkg.GoFiles = exclude(pkg.GoFiles, "sticky_notbsd.go")
+	case "os/exec":
+		pkg.GoFiles = include(pkg.GoFiles, "lp_js.go")
 	case "runtime":
 		pkg.GoFiles = []string{} // Package sources are completely replaced in natives.
 	case "runtime/internal/sys":
@@ -188,14 +184,23 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 	case "runtime/pprof":
 		pkg.GoFiles = nil
 	case "internal/poll":
-		pkg.GoFiles = exclude(pkg.GoFiles, "fd_poll_runtime.go")
+		pkg.GoFiles = include(exclude(pkg.GoFiles, "fd_poll_runtime.go"), "fd_posix.go", "fd_unix.go", "fd_fsync_posix.go", "hook_unix.go", "sys_cloexec.go", "fcntl_js.go")
+	case "path/filepath":
+		pkg.GoFiles = include(pkg.GoFiles, "path_unix.go")
+	case "internal/syscall/unix":
+		pkg.GoFiles = include(pkg.GoFiles, "nonblocking_js.go")
 	case "sync":
 		// GopherJS completely replaces sync.Pool implementation with a simpler one,
 		// since it always executes in a single-threaded environment.
 		pkg.GoFiles = exclude(pkg.GoFiles, "pool.go")
+	case "syscall":
+		// Add files with a `js,wasm` build constraint which still work for GopherJS.
+		pkg.GoFiles = include(pkg.GoFiles, "dirent.go", "endian_little.go", "env_unix.go", "fs_js.go", "net_js.go", "syscall_js.go", "tables_js.go", "timestruct.go")
+	case "time":
+		pkg.GoFiles = include(pkg.GoFiles, "sys_unix.go")
 	case "crypto/rand":
 		pkg.GoFiles = []string{"rand.go", "util.go"}
-		pkg.TestGoFiles = exclude(pkg.TestGoFiles, "rand_linux_test.go") // Don't want linux-specific tests (since linux-specific package files are excluded too).
+		pkg.TestGoFiles = include(pkg.TestGoFiles, "rand_linux_test.go") // Don't want linux-specific tests (since linux-specific package files are excluded too).
 	case "crypto/x509":
 		// GopherJS doesn't support loading OS root certificates regardless of the
 		// OS. The substitution below allows to avoid build dependency on Mac OS
@@ -209,7 +214,7 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 	case "syscall/js":
 		// Reuse upstream tests to ensure conformance, but completely replace
 		// implementation.
-		pkg.XTestGoFiles = append(pkg.TestGoFiles, "js_test.go")
+		pkg.XTestGoFiles = include(pkg.TestGoFiles, "js_test.go")
 	}
 
 	if len(pkg.CgoFiles) > 0 {
@@ -233,6 +238,8 @@ func importWithSrcDir(bctx build.Context, path string, srcDir string, mode build
 	if err != nil {
 		return nil, err
 	}
+
+	// fmt.Printf("%s: %v %v %v\n", path, pkg.GoFiles, pkg.TestGoFiles, pkg.XTestGoFiles)
 
 	return &PackageData{Package: pkg, JSFiles: jsFiles, IsVirtual: isVirtual}, nil
 }
@@ -349,14 +356,6 @@ func parseAndAugment(bctx *build.Context, pkg *build.Package, isTest bool, fileS
 		OpenFile: func(name string) (r io.ReadCloser, err error) {
 			return natives.FS.Open(name)
 		},
-	}
-
-	if importPath == "syscall" {
-		// Special handling for the syscall package, which uses OS native
-		// GOOS/GOARCH pair. This will no longer be necessary after
-		// https://github.com/gopherjs/gopherjs/issues/693.
-		nativesContext.GOARCH = "wasm"
-		nativesContext.GOOS = "js"
 	}
 
 	if nativesPkg, err := nativesContext.Import(importPath, "", 0); err == nil {

@@ -25,6 +25,13 @@ if ($global === undefined || $global.Array === undefined) {
 if (typeof module !== "undefined") {
   $module = module;
 }
+if (!global.fs && global.require) {
+  const fs = require("fs");
+  if (typeof fs === "object" && fs !== null && Object.keys(fs).length !== 0) {
+          global.fs = fs;
+  }
+}
+
 var $linknames = {} // Collection of functions referenced by a go:linkname directive.
 var $packages = {}, $idCounter = 0;
 var $keys = function(m) { return m ? Object.keys(m) : []; };
