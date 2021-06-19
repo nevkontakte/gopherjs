@@ -21,11 +21,11 @@ var FS = func() http.FileSystem {
 	fs := vfsgen۰FS{
 		"/": &vfsgen۰DirInfo{
 			name:    "/",
-			modTime: time.Date(2021, 6, 12, 16, 11, 21, 726780500, time.UTC),
+			modTime: time.Date(2021, 6, 19, 22, 21, 8, 410000000, time.UTC),
 		},
 		"/js": &vfsgen۰DirInfo{
 			name:    "js",
-			modTime: time.Date(2021, 3, 28, 16, 13, 12, 537781400, time.UTC),
+			modTime: time.Date(2021, 6, 19, 22, 21, 8, 410000000, time.UTC),
 		},
 		"/js/js.go": &vfsgen۰CompressedFileInfo{
 			name:             "js.go",
