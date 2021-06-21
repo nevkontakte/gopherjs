@@ -45,9 +45,9 @@ func newEmbeddedCtx(embedded http.FileSystem, GOOS, GOARCH string) *embeddedCtx 
 	return &ec
 }
 
-// Import a package with the |importPath|. If |srcDir| is specified, the package is imported from the given directory.
+// Import returns details about the Go package named by the importPath, interpreting local import paths relative to the srcDir directory.
 func (ec embeddedCtx) Import(importPath string, srcDir string, mode build.ImportMode) (*PackageData, error) {
-	pkg, err := ec.bctx.Import(importPath, srcDir, mode)
+	pkg, err := ec.bctx.Import(importPath, srcDir, build.FindOnly)
 	if err != nil {
 		return nil, err
 	}

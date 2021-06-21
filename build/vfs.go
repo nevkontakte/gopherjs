@@ -48,3 +48,21 @@ func splitPathList(list string) []string {
 	const pathListSeparator = ":" // UNIX style
 	return strings.Split(list, pathListSeparator)
 }
+
+// withPrefix implements http.FileSystem, which places the underlying FS under
+// the given prefix path.
+type withPrefix struct {
+	fs     http.FileSystem
+	prefix string
+}
+
+func (wp *withPrefix) Open(name string) (http.File, error) {
+	if !strings.HasPrefix(name, wp.prefix) {
+		return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrNotExist}
+	}
+	f, err := wp.fs.Open(strings.TrimPrefix(name, wp.prefix))
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: name, Err: err}
+	}
+	return f, nil
+}
