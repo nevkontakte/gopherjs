@@ -1,3 +1,8 @@
+// Package build implements GopherJS build system.
+//
+// WARNING: This package's API is treated as internal and currently doesn't
+// provide any API stability guarantee, use it at your own risk. If you need a
+// stable interface, prefer invoking the gopherjs CLI tool as a subprocess.
 package build
 
 import (
@@ -307,53 +312,14 @@ func parseAndAugment(bctx *build.Context, pkg *build.Package, isTest bool, fileS
 		importPath = importPath[:len(importPath)-5]
 	}
 
-	nativesContext := &build.Context{
-		GOROOT:   "/",
-		GOOS:     bctx.GOOS,
-		GOARCH:   bctx.GOARCH,
-		Compiler: "gc",
-		JoinPath: path.Join,
-		SplitPathList: func(list string) []string {
-			if list == "" {
-				return nil
-			}
-			return strings.Split(list, "/")
-		},
-		IsAbsPath: path.IsAbs,
-		IsDir: func(name string) bool {
-			dir, err := natives.FS.Open(name)
-			if err != nil {
-				return false
-			}
-			defer dir.Close()
-			info, err := dir.Stat()
-			if err != nil {
-				return false
-			}
-			return info.IsDir()
-		},
-		HasSubdir: func(root, name string) (rel string, ok bool) {
-			panic("not implemented")
-		},
-		ReadDir: func(name string) (fi []os.FileInfo, err error) {
-			dir, err := natives.FS.Open(name)
-			if err != nil {
-				return nil, err
-			}
-			defer dir.Close()
-			return dir.Readdir(0)
-		},
-		OpenFile: func(name string) (r io.ReadCloser, err error) {
-			return natives.FS.Open(name)
-		},
-	}
+	nativesContext := newEmbeddedCtx(natives.FS, bctx.GOOS, bctx.GOARCH)
 
 	if importPath == "syscall" {
 		// Special handling for the syscall package, which uses OS native
 		// GOOS/GOARCH pair. This will no longer be necessary after
 		// https://github.com/gopherjs/gopherjs/issues/693.
-		nativesContext.GOARCH = build.Default.GOARCH
-		nativesContext.BuildTags = append(nativesContext.BuildTags, "js")
+		nativesContext.bctx.GOARCH = build.Default.GOARCH
+		nativesContext.bctx.BuildTags = append(nativesContext.bctx.BuildTags, "js")
 	}
 
 	if nativesPkg, err := nativesContext.Import(importPath, "", 0); err == nil {
@@ -366,7 +332,7 @@ func parseAndAugment(bctx *build.Context, pkg *build.Package, isTest bool, fileS
 		}
 		for _, name := range names {
 			fullPath := path.Join(nativesPkg.Dir, name)
-			r, err := nativesContext.OpenFile(fullPath)
+			r, err := nativesContext.bctx.OpenFile(fullPath)
 			if err != nil {
 				panic(err)
 			}
