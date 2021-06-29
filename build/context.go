@@ -104,6 +104,26 @@ func goCtx(installSuffix string, buildTags []string) *simpleCtx {
 	return &gc
 }
 
+// chainedCtx combines two build contexts. If a package is not found in the
+// primary context, it will be searched for in the secondary. If a package is
+// found in the primary, the secondary will be ignored.
+type chainedCtx struct {
+	primary   buildCtx
+	secondary buildCtx
+}
+
+// Import implements buildCtx.Import().
+func (cc chainedCtx) Import(importPath string, srcDir string, mode build.ImportMode) (*PackageData, error) {
+	pkg, err := cc.primary.Import(importPath, srcDir, mode)
+	if err == nil {
+		return pkg, nil
+	} else if IsPkgNotFound(err) {
+		return cc.secondary.Import(importPath, srcDir, mode)
+	} else {
+		return nil, err
+	}
+}
+
 // IsPkgNotFound returns true if the error was caused by package not found.
 //
 // Unfortunately, go/build doesn't make use of typed errors, so we have to

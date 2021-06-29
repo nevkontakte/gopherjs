@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/gopherjs/gopherjs/compiler/gopherjspkg"
+	"golang.org/x/tools/go/buildutil"
 )
 
 func TestSimpleCtx(t *testing.T) {
@@ -80,6 +81,56 @@ func TestSimpleCtx(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestChainedCtx(t *testing.T) {
+	// Construct a chained context of two fake contexts so that we could verify
+	// fallback behavior.
+	cc := chainedCtx{
+		primary: simpleCtx{
+			bctx: *buildutil.FakeContext(map[string]map[string]string{
+				"primaryonly": {"po.go": "package primaryonly"},
+				"both":        {"both.go": "package both"},
+			}),
+			isVirtual: false,
+		},
+		secondary: simpleCtx{
+			bctx: *buildutil.FakeContext(map[string]map[string]string{
+				"both":          {"both_secondary.go": "package both"},
+				"secondaryonly": {"so.go": "package secondaryonly"},
+			}),
+			isVirtual: true,
+		},
+	}
+
+	tests := []struct {
+		importPath      string
+		wantFromPrimary bool
+	}{
+		{
+			importPath:      "primaryonly",
+			wantFromPrimary: true,
+		}, {
+			importPath:      "both",
+			wantFromPrimary: true,
+		}, {
+			importPath:      "secondaryonly",
+			wantFromPrimary: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.importPath, func(t *testing.T) {
+			pkg, err := cc.Import(test.importPath, "", 0)
+			if err != nil {
+				t.Errorf("cc.Import() returned error: %v. Want: no error.", err)
+			}
+			gotFromPrimary := !pkg.IsVirtual
+			if gotFromPrimary != test.wantFromPrimary {
+				t.Errorf("Got package imported from primary: %t. Want: %t.", gotFromPrimary, test.wantFromPrimary)
+			}
+		})
+	}
 }
 
 func expectedPackage(bctx *build.Context, importPath string) *build.Package {
