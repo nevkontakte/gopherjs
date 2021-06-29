@@ -312,7 +312,7 @@ func parseAndAugment(bctx *build.Context, pkg *build.Package, isTest bool, fileS
 		importPath = importPath[:len(importPath)-5]
 	}
 
-	nativesContext := newEmbeddedCtx(natives.FS, bctx.GOOS, bctx.GOARCH)
+	nativesContext := embeddedCtx(natives.FS, bctx.GOOS, bctx.GOARCH)
 
 	if importPath == "syscall" {
 		// Special handling for the syscall package, which uses OS native
