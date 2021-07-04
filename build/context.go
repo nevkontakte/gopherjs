@@ -29,7 +29,8 @@ type simpleCtx struct {
 
 // Import implements buildCtx.Import().
 func (sc simpleCtx) Import(importPath string, srcDir string, mode build.ImportMode) (*PackageData, error) {
-	pkg, err := sc.bctx.Import(importPath, srcDir, mode)
+	bctx, mode := sc.applyPackageTweaks(importPath, mode)
+	pkg, err := bctx.Import(importPath, srcDir, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -42,6 +43,33 @@ func (sc simpleCtx) Import(importPath string, srcDir string, mode build.ImportMo
 		IsVirtual: sc.isVirtual,
 		JSFiles:   jsFiles,
 	}, nil
+}
+
+// applyPackageTweaks makes several package-specific adjustments to package importing.
+//
+// Ideally this mathod would not be necessary, but currently several packages
+// require special handing in order to be compatible with GopherJS. This method
+// returns a copy of the build context, keeping the original one intact.
+func (sc simpleCtx) applyPackageTweaks(importPath string, mode build.ImportMode) (build.Context, build.ImportMode) {
+	bctx := sc.bctx
+	switch importPath {
+	case "syscall":
+		// syscall needs to use a typical GOARCH like amd64 to pick up definitions for _Socklen, BpfInsn, IFNAMSIZ, Timeval, BpfStat, SYS_FCNTL, Flock_t, etc.
+		bctx.GOARCH = build.Default.GOARCH
+		bctx.InstallSuffix += build.Default.GOARCH
+	case "syscall/js":
+		// There are no buildable files in this package, but we need to use files in the virtual directory.
+		mode |= build.FindOnly
+	case "crypto/x509", "os/user":
+		// These stdlib packages have cgo and non-cgo versions (via build tags); we want the latter.
+		bctx.CgoEnabled = false
+	case "github.com/gopherjs/gopherjs/js", "github.com/gopherjs/gopherjs/nosync":
+		// These packages are already embedded via gopherjspkg.FS virtual filesystem (which can be
+		// safely vendored). Don't try to use vendor directory to resolve them.
+		mode |= build.IgnoreVendor
+	}
+
+	return bctx, mode
 }
 
 // embeddedCtx creates simpleCtx that imports from a virtual FS embedded into
