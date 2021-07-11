@@ -5,19 +5,28 @@ import (
 	"go/build"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/gopherjs/gopherjs/compiler"
+	"github.com/kisielk/gotool"
 )
 
-// buildCtx is a common interface for a variety of different contexts
+// XContext is a common interface for a variety of different contexts
 // GopherJS can get package sources.
 //
 // It is generally can be thought of as abstract and extended go/build.Context.
-type buildCtx interface {
+type XContext interface {
 	// Import returns details about the Go package named by the importPath,
 	// interpreting local import paths relative to the srcDir directory.
 	Import(path string, srcDir string, mode build.ImportMode) (*PackageData, error)
+
+	// GOOS returns GOOS value the underlying build.Context is using.
+	// This will become obsolete after https://github.com/gopherjs/gopherjs/issues/693.
+	GOOS() string
+
+	// Match finds import paths based on the CLI patterns.
+	Match(patterns []string) []string
 }
 
 // simpleCtx adds GopherJS-specific metadata to packages imported by
@@ -42,8 +51,22 @@ func (sc simpleCtx) Import(importPath string, srcDir string, mode build.ImportMo
 		Package:   pkg,
 		IsVirtual: sc.isVirtual,
 		JSFiles:   jsFiles,
+		bctx:      &sc.bctx,
 	}, nil
 }
+
+// Match build patterns in the current context.
+func (sc simpleCtx) Match(patterns []string) []string {
+	// FIXME(nevkontakte): The gotool library prints warnings directly to stderr
+	// when it matched no packages. This is a common source of noise in VFS-based
+	// contexts.
+	// FIXME(nevkontakte): This package is likely outdated (last updated in 2018)
+	// and doesn't behave correctly with modules.
+	tool := gotool.Context{BuildContext: sc.bctx}
+	return tool.ImportPaths(patterns)
+}
+
+func (sc simpleCtx) GOOS() string { return sc.bctx.GOOS }
 
 // applyPackageTweaks makes several package-specific adjustments to package importing.
 //
@@ -72,32 +95,31 @@ func (sc simpleCtx) applyPackageTweaks(importPath string, mode build.ImportMode)
 	return bctx, mode
 }
 
+var defaultBuildTags = []string{
+	"netgo",            // See https://godoc.org/net#hdr-Name_Resolution.
+	"purego",           // See https://golang.org/issues/23172.
+	"math_big_pure_go", // Use pure Go version of math/big.
+}
+
 // embeddedCtx creates simpleCtx that imports from a virtual FS embedded into
 // the GopherJS compiler.
-func embeddedCtx(embedded http.FileSystem, GOOS, GOARCH string) *simpleCtx {
+func embeddedCtx(embedded http.FileSystem, installSuffix string, buildTags []string) *simpleCtx {
 	fs := &vfs{embedded}
-	ec := simpleCtx{
-		bctx: build.Context{
-			GOROOT:   "/",
-			GOPATH:   "/",
-			GOOS:     GOOS,
-			GOARCH:   GOARCH,
-			Compiler: "gc",
+	ec := goCtx(installSuffix, buildTags)
+	ec.bctx.GOPATH = ""
 
-			// path functions must behave unix-like to work with the VFS.
-			JoinPath:      path.Join,
-			SplitPathList: splitPathList,
-			IsAbsPath:     path.IsAbs,
+	// Path functions must behave unix-like to work with the VFS.
+	ec.bctx.JoinPath = path.Join
+	ec.bctx.SplitPathList = splitPathList
+	ec.bctx.IsAbsPath = path.IsAbs
 
-			// Substitute real FS with the embedded one.
-			IsDir:     fs.IsDir,
-			HasSubdir: fs.HasSubDir,
-			ReadDir:   fs.ReadDir,
-			OpenFile:  fs.OpenFile,
-		},
-		isVirtual: true,
-	}
-	return &ec
+	// Substitute real FS with the embedded one.
+	ec.bctx.IsDir = fs.IsDir
+	ec.bctx.HasSubdir = fs.HasSubDir
+	ec.bctx.ReadDir = fs.ReadDir
+	ec.bctx.OpenFile = fs.OpenFile
+	ec.isVirtual = true
+	return ec
 }
 
 // goCtx creates simpleCtx that imports from the real file system GOROOT, GOPATH
@@ -111,11 +133,8 @@ func goCtx(installSuffix string, buildTags []string) *simpleCtx {
 			GOARCH:        "js",
 			InstallSuffix: installSuffix,
 			Compiler:      "gc",
-			BuildTags: append(buildTags,
-				"netgo",  // See https://godoc.org/net#hdr-Name_Resolution.
-				"purego", // See https://golang.org/issues/23172.
-			),
-			CgoEnabled: true, // detect `import "C"` to throw proper error
+			BuildTags:     append(buildTags, defaultBuildTags...),
+			CgoEnabled:    true, // detect `import "C"` to throw proper error
 
 			// go/build supports modules, but only when no FS access functions are
 			// overridden and when provided ReleaseTags match those of the default
@@ -136,8 +155,8 @@ func goCtx(installSuffix string, buildTags []string) *simpleCtx {
 // primary context, it will be searched for in the secondary. If a package is
 // found in the primary, the secondary will be ignored.
 type chainedCtx struct {
-	primary   buildCtx
-	secondary buildCtx
+	primary   XContext
+	secondary XContext
 }
 
 // Import implements buildCtx.Import().
@@ -150,6 +169,24 @@ func (cc chainedCtx) Import(importPath string, srcDir string, mode build.ImportM
 	} else {
 		return nil, err
 	}
+}
+
+func (cc chainedCtx) GOOS() string { return cc.primary.GOOS() }
+
+// Match build patterns to both context. The returned list is sorted and free of
+// duplicates.
+func (cc chainedCtx) Match(patterns []string) []string {
+	seen := map[string]bool{}
+	matches := []string{}
+	for _, m := range append(cc.primary.Match(patterns), cc.secondary.Match(patterns)...) {
+		if seen[m] {
+			continue
+		}
+		seen[m] = true
+		matches = append(matches, m)
+	}
+	sort.Strings(matches)
+	return matches
 }
 
 // IsPkgNotFound returns true if the error was caused by package not found.

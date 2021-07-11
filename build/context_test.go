@@ -4,23 +4,26 @@ import (
 	"fmt"
 	"go/build"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopherjs/gopherjs/compiler/gopherjspkg"
 	"golang.org/x/tools/go/buildutil"
 )
 
 func TestSimpleCtx(t *testing.T) {
-	fs := &withPrefix{gopherjspkg.FS, "/src/github.com/gopherjs/gopherjs/"}
-	ec := embeddedCtx(fs, build.Default.GOOS, "js")
+	gopherjsRoot := filepath.Join(DefaultGOROOT, "src", "github.com", "gopherjs", "gopherjs")
+	fs := &withPrefix{gopherjspkg.FS, gopherjsRoot}
+	ec := embeddedCtx(fs, "", []string{})
 
 	gc := goCtx("", []string{})
 
 	t.Run("exists", func(t *testing.T) {
 		tests := []struct {
-			buildCtx buildCtx
+			buildCtx XContext
 			wantPkg  *PackageData
 		}{
 			{
@@ -45,7 +48,7 @@ func TestSimpleCtx(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ec.Import(%q) returned error: %s. Want: no error.", importPath, err)
 				}
-				if diff := cmp.Diff(test.wantPkg, got); diff != "" {
+				if diff := cmp.Diff(test.wantPkg, got, cmpopts.IgnoreUnexported(*got)); diff != "" {
 					t.Errorf("ec.Import(%q) returned diff (-want,+got):\n%s", importPath, diff)
 				}
 			})
@@ -54,7 +57,7 @@ func TestSimpleCtx(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		tests := []struct {
-			buildCtx   buildCtx
+			buildCtx   XContext
 			importPath string
 		}{
 			{

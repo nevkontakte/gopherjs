@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"go/build"
 	gobuild "go/build"
 	"go/token"
 	"strconv"
@@ -77,7 +78,7 @@ func TestNativesDontImportExtraPackages(t *testing.T) {
 
 			// Use parseAndAugment to get a list of augmented AST files.
 			fset := token.NewFileSet()
-			files, err := parseAndAugment(NewBuildContext("", nil), bpkg, false, fset)
+			files, err := parseAndAugment(NewBuildContext("", nil), &PackageData{Package: bpkg, bctx: &build.Default}, false, fset)
 			if err != nil {
 				t.Fatalf("github.com/gopherjs/gopherjs/build.parseAndAugment: %v", err)
 			}
@@ -116,7 +117,7 @@ func TestNativesDontImportExtraPackages(t *testing.T) {
 
 			// Use parseAndAugment to get a list of augmented AST files.
 			fset := token.NewFileSet()
-			files, err := parseAndAugment(NewBuildContext("", nil), bpkg, true, fset)
+			files, err := parseAndAugment(NewBuildContext("", nil), &PackageData{Package: bpkg, bctx: &build.Default}, true, fset)
 			if err != nil {
 				t.Fatalf("github.com/gopherjs/gopherjs/build.parseAndAugment: %v", err)
 			}
@@ -158,7 +159,7 @@ func TestNativesDontImportExtraPackages(t *testing.T) {
 
 			// Use parseAndAugment to get a list of augmented AST files, then check only the external test files.
 			fset := token.NewFileSet()
-			files, err := parseAndAugment(NewBuildContext("", nil), bpkg, true, fset)
+			files, err := parseAndAugment(NewBuildContext("", nil), &PackageData{Package: bpkg, bctx: &build.Default}, true, fset)
 			if err != nil {
 				t.Fatalf("github.com/gopherjs/gopherjs/build.parseAndAugment: %v", err)
 			}
