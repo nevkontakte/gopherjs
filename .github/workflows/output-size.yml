@@ -3,8 +3,8 @@ name: Compiled output size changes
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
-  push:
-    branches: [ "**" ]
+  # push:
+  #   branches: [ "**" ]
   pull_request:
     branches: [ "**" ]
 
@@ -33,7 +33,7 @@ jobs:
           echo "SOURCE_MAP_SUPPORT=true" >> $GITHUB_ENV    
           echo "NODE_PATH=$(npm root)" >> $GITHUB_ENV
           # cp -R "$(npm root)" "/home/runner/work/_actions/nevkontakte/gopherjs-output-size"
-      - uses: nevkontakte/gopherjs-output-size@v0.0.11
+      - uses: nevkontakte/gopherjs-output-size@v0.0.13
         with:
           name: jQuery TodoMVC
           repo: https://github.com/gopherjs/todomvc
