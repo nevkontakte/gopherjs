@@ -21,6 +21,9 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '^1.17.2'
       - uses: actions/setup-node@v2
         with:
           node-version: '12'
@@ -28,12 +31,12 @@ jobs:
       - run: npm ci
       - run: |
           echo "SOURCE_MAP_SUPPORT=true" >> $GITHUB_ENV    
-          echo "NODE_PATH='$(npm root)'" >> $GITHUB_ENV
-          cp -R "$(npm root)" "$HOME/.node_modules"
-      - uses: nevkontakte/gopherjs-output-size@v0.0.3
+          echo "NODE_PATH=$(npm root)" >> $GITHUB_ENV
+          # cp -R "$(npm root)" "/home/runner/work/_actions/nevkontakte/gopherjs-output-size"
+      - uses: nevkontakte/gopherjs-output-size@v0.0.11
         with:
           name: jQuery TodoMVC
-          repo: git@github.com:gopherjs/todomvc.git
+          repo: https://github.com/gopherjs/todomvc
           go-package: github.com/gopherjs/todomvc
           nonce: 1
 
