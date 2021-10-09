@@ -26,8 +26,10 @@ jobs:
           node-version: '12'
           cache: 'npm'
       - run: npm ci
-      - run: echo "SOURCE_MAP_SUPPORT=true" >> $GITHUB_ENV
-      - run: echo "NODE_PATH='$(npm root)'" >> $GITHUB_ENV
+      - run: |
+          echo "SOURCE_MAP_SUPPORT=true" >> $GITHUB_ENV    
+          echo "NODE_PATH='$(npm root)'" >> $GITHUB_ENV
+          cp -R "$(npm root)" "$HOME/.node_modules"
       - uses: nevkontakte/gopherjs-output-size@v0.0.3
         with:
           name: jQuery TodoMVC
