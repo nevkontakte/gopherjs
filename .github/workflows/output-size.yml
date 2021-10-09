@@ -28,7 +28,7 @@ jobs:
       - run: npm ci
       - run: echo "SOURCE_MAP_SUPPORT=true" >> $GITHUB_ENV
       - run: echo "NODE_PATH='$(npm root)'" >> $GITHUB_ENV
-      - uses: nevkontakte/gopherjs-output-size@main
+      - uses: nevkontakte/gopherjs-output-size@v0.0.1
         with:
           name: jQuery TodoMVC
           repo: git@github.com:gopherjs/todomvc.git
