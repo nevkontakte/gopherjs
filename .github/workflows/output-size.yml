@@ -27,5 +27,5 @@ jobs:
         with:
           name: jQuery TodoMVC
           repo: git@github.com:gopherjs/todomvc.git
-          package: github.com/gopherjs/todomvc
+          go-package: github.com/gopherjs/todomvc
 
