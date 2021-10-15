@@ -40,4 +40,9 @@ jobs:
           name: jQuery TodoMVC
           repo: https://github.com/gopherjs/todomvc
           go-package: github.com/gopherjs/todomvc
+          report: /tmp/report.json
+      - uses: actions/upload-artifact@v2
+        with:
+          name: Report
+          path: /tmp/report.json
 
