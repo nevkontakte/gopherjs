@@ -26,15 +26,8 @@ jobs:
       - uses: actions/setup-go@v2
         with:
           go-version: '^1.17.2'
-      - uses: actions/setup-node@v2
-        with:
-          node-version: '12'
-          cache: 'npm'
-      - run: npm ci
       - run: |
-          echo "SOURCE_MAP_SUPPORT=true" >> $GITHUB_ENV    
-          echo "NODE_PATH=$(npm root)" >> $GITHUB_ENV
-          # cp -R "$(npm root)" "/home/runner/work/_actions/nevkontakte/gopherjs-output-size"
+          echo "SOURCE_MAP_SUPPORT=false" >> $GITHUB_ENV    
       - uses: nevkontakte/gopherjs-output-size@main
         with:
           name: jQuery TodoMVC
