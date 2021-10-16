@@ -1,0 +1,21 @@
+name: Publish canonical app size
+
+on:
+  workflow_run:
+    workflows: ["Measure canonical app size"]
+    types: ["completed"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: Report
+          path: /tmp/report.json
+      - uses: nevkontakte/gopherjs-output-size/publish@main
+        with:
+          report: /tmp/report.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+
