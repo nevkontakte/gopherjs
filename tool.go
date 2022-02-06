@@ -158,7 +158,7 @@ func main() {
 						if pkgObj == "" {
 							pkgObj = filepath.Base(pkg.Dir) + ".js"
 						}
-						if pkg.IsCommand() && !pkg.UpToDate {
+						if pkg.IsCommand() {
 							if err := s.WriteCommandPackage(archive, pkgObj); err != nil {
 								return err
 							}
@@ -223,10 +223,8 @@ func main() {
 						return err
 					}
 
-					if pkg.IsCommand() && !pkg.UpToDate {
-						if err := s.WriteCommandPackage(archive, pkg.PkgObj); err != nil {
-							return err
-						}
+					if err := s.WriteCommandPackage(archive, pkg.InstallPath()); err != nil {
+						return err
 					}
 				}
 				return nil
@@ -415,17 +413,23 @@ func main() {
 				if err != nil {
 					return err
 				}
+				// FIXME(nevkontakte): Check error.
+				s.BuildImportPath("testing/internal/testdeps")
 
-				importContext := &compiler.ImportContext{
-					Packages: s.Types,
-					Import: func(path string) (*compiler.Archive, error) {
-						if path == pkg.ImportPath || path == pkg.ImportPath+"_test" {
-							return s.Archives[path], nil
-						}
-						return s.BuildImportPath(path)
+				mainPkg := &gbuild.PackageData{
+					Package: &build.Package{
+						ImportPath: pkg.ImportPath + ".testmain",
+						Name:       "main",
+					},
+					ImportOverrides: map[string]string{
+						pkg.ImportPath: pkg.ImportPath + ".test",
 					},
 				}
-				mainPkgArchive, err := compiler.Compile("main", []*ast.File{mainFile}, fset, importContext, options.Minify)
+				importContext := &compiler.ImportContext{
+					Packages: s.Types,
+					Import:   s.ImportResolverFor(mainPkg),
+				}
+				mainPkgArchive, err := compiler.Compile(mainPkg.ImportPath, []*ast.File{mainFile}, fset, importContext, options.Minify)
 				if err != nil {
 					return err
 				}
@@ -1016,7 +1020,7 @@ import (
 	{{if .NeedTest}}_test{{else}}_{{end}} {{.Package.ImportPath | printf "%q"}}
 {{end}}
 {{if .ImportXtest}}
-	{{if .NeedXtest}}_xtest{{else}}_{{end}} {{.Package.ImportPath | printf "%s_test" | printf "%q"}}
+	{{if .NeedXtest}}_xtest{{else}}_{{end}} {{.Package.ImportPath | printf "%s.xtest" | printf "%q"}}
 {{end}}
 )
 

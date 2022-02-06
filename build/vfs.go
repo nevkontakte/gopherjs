@@ -2,6 +2,7 @@ package build
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
@@ -36,6 +37,15 @@ func (fs vfs) ReadDir(name string) (fi []os.FileInfo, err error) {
 
 func (fs vfs) OpenFile(name string) (r io.ReadCloser, err error) {
 	return fs.Open(name)
+}
+
+func (fs vfs) Stat(name string) (fs.FileInfo, error) {
+	f, err := fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Stat()
 }
 
 func splitPathList(list string) []string {

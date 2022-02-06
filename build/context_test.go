@@ -48,7 +48,7 @@ func TestSimpleCtx(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ec.Import(%q) returned error: %s. Want: no error.", importPath, err)
 				}
-				if diff := cmp.Diff(test.wantPkg, got, cmpopts.IgnoreUnexported(*got)); diff != "" {
+				if diff := cmp.Diff(test.wantPkg, got, cmpopts.IgnoreUnexported(*got), cmpopts.IgnoreFields(*got, "SrcModTime")); diff != "" {
 					t.Errorf("ec.Import(%q) returned diff (-want,+got):\n%s", importPath, diff)
 				}
 			})

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/build"
 	"go/token"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -36,8 +37,11 @@ type XContext interface {
 // simpleCtx is a wrapper around go/build.Context with support for GopherJS-specific
 // features.
 type simpleCtx struct {
-	bctx      build.Context
-	isVirtual bool // Imported packages don't have a physical directory on disk.
+	bctx build.Context
+	// If not nil, used instead of os.Stat().
+	stat func(path string) (fs.FileInfo, error)
+	// Imported packages don't have a physical directory on disk.
+	isVirtual bool
 }
 
 // Import implements XContext.Import().
@@ -51,7 +55,6 @@ func (sc simpleCtx) Import(importPath string, srcDir string, mode build.ImportMo
 	if err != nil {
 		return nil, fmt.Errorf("failed to enumerate .inc.js files in %s: %w", pkg.Dir, err)
 	}
-	pkg.PkgObj = sc.rewritePkgObj(pkg.PkgObj)
 	if !path.IsAbs(pkg.Dir) {
 		pkg.Dir = mustAbs(pkg.Dir)
 	}
@@ -61,12 +64,14 @@ func (sc simpleCtx) Import(importPath string, srcDir string, mode build.ImportMo
 		return nil, &ImportCError{pkg.ImportPath}
 	}
 
-	return &PackageData{
+	pkgData := &PackageData{
 		Package:   pkg,
 		IsVirtual: sc.isVirtual,
 		JSFiles:   jsFiles,
 		bctx:      &sc.bctx,
-	}, nil
+	}
+	pkgData.SrcModTime = pkgModTime(pkgData, sc.stat)
+	return pkgData, nil
 }
 
 // Match implements XContext.Match.
@@ -252,33 +257,6 @@ func (sc simpleCtx) applyPostloadTweaks(pkg *build.Package) *build.Package {
 	return pkg
 }
 
-func (sc simpleCtx) rewritePkgObj(orig string) string {
-	if orig == "" {
-		return orig
-	}
-
-	goroot := mustAbs(sc.bctx.GOROOT)
-	gopath := mustAbs(sc.bctx.GOPATH)
-	orig = mustAbs(orig)
-
-	if strings.HasPrefix(orig, filepath.Join(gopath, "pkg", "mod")) {
-		// Go toolchain makes sources under GOPATH/pkg/mod readonly, so we can't
-		// store our artifacts there.
-		return cachedPath(orig)
-	}
-
-	allowed := []string{goroot, gopath}
-	for _, prefix := range allowed {
-		if strings.HasPrefix(orig, prefix) {
-			// Traditional GOPATH-style locations for build artifacts are ok to use.
-			return orig
-		}
-	}
-
-	// Everything else also goes into the cache just in case.
-	return cachedPath(orig)
-}
-
 var defaultBuildTags = []string{
 	"netgo",            // See https://godoc.org/net#hdr-Name_Resolution.
 	"purego",           // See https://golang.org/issues/23172.
@@ -302,6 +280,7 @@ func embeddedCtx(embedded http.FileSystem, installSuffix string, buildTags []str
 	ec.bctx.IsDir = fs.IsDir
 	ec.bctx.ReadDir = fs.ReadDir
 	ec.bctx.OpenFile = fs.OpenFile
+	ec.stat = fs.Stat
 	ec.isVirtual = true
 	return ec
 }
