@@ -273,6 +273,7 @@ func main() {
 	cmdRun.Flags().AddFlagSet(flagQuiet)
 	cmdRun.Flags().AddFlagSet(compilerFlags)
 	cmdRun.Run = func(cmd *cobra.Command, args []string) {
+		options.BuildTags = strings.Fields(tags)
 		err := func() error {
 			lastSourceArg := 0
 			for {
