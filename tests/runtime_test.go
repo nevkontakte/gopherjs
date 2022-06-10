@@ -1,5 +1,4 @@
 //go:build js && gopherjs
-// +build js,gopherjs
 
 package tests
 
@@ -8,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/gopherjs/gopherjs/js"
 )
 
@@ -78,4 +78,72 @@ func TestBuildPlatform(t *testing.T) {
 	if runtime.GOARCH != "ecmascript" {
 		t.Errorf("Got runtime.GOARCH=%q. Want: %q.", runtime.GOARCH, "ecmascript")
 	}
+}
+
+type callStack []string
+
+func (c *callStack) capture() {
+	*c = nil
+	pc := [100]uintptr{}
+	depth := runtime.Callers(0, pc[:])
+	frames := runtime.CallersFrames(pc[:depth])
+	for true {
+		frame, more := frames.Next()
+		*c = append(*c, frame.Function)
+		if !more {
+			break
+		}
+	}
+}
+
+func TestCallers(t *testing.T) {
+	got := callStack{}
+
+	// Expected GopherJS call stack with the upstream Go counterparts.
+	// Until https://github.com/gopherjs/gopherjs/issues/1085 is resolved, the
+	// mismatch is difficult to avoid.
+	want := callStack{
+		"Object.Callers", // runtime.Callers
+		"typ.$packages.github.com/gopherjs/gopherjs/tests.$ptrType.capture", // github.com/gopherjs/gopherjs/tests.(*callerNames).capture
+		"$b",             // github.com/gopherjs/gopherjs/tests.TestCallers.func{1,2}
+		"tRunner",        // testing.tRunner
+		"runtime.goexit", // runtime.goexit
+	}
+
+	t.Run("Normal", func(t *testing.T) {
+		got.capture()
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("runtime.Callers() returned a diff (-want,+got):\n%s", diff)
+		}
+	})
+
+	t.Run("Deferred", func(t *testing.T) {
+		defer func() {
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("runtime.Callers() returned a diff (-want,+got):\n%s", diff)
+			}
+		}()
+		defer got.capture()
+	})
+
+	t.Run("Recover", func(t *testing.T) {
+		defer func() {
+			recover()
+			got.capture()
+
+			want := callStack{
+				"Object.Callers", // runtime.Callers
+				"typ.$packages.github.com/gopherjs/gopherjs/tests.$ptrType.capture", // github.com/gopherjs/gopherjs/tests.(*callerNames).capture
+				"$b",              // github.com/gopherjs/gopherjs/tests.TestCallers.func3.1
+				"runtime.gopanic", // runtime.gopanic
+				"$b",              // github.com/gopherjs/gopherjs/tests.TestCallers.func{1,2}
+				"tRunner",         // testing.tRunner
+				"runtime.goexit",  // runtime.goexit
+			}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("runtime.Callers() returned a diff (-want,+got):\n%s", diff)
+			}
+		}()
+		panic("panic")
+	})
 }
