@@ -664,7 +664,7 @@ func (fc *funcContext) translateToplevelFunction(fun *ast.FuncDecl, info *analys
 			return []byte(fmt.Sprintf("\t%s = function() {\n\t\t$throwRuntimeError(\"native function not implemented: %s\");\n\t};\n", funcRef, o.FullName()))
 		}
 
-		params, fun := translateFunction(fun.Type, recv, fun.Body, fc, sig, info, funcRef)
+		params, fun := translateFunction(fun.Type, recv, fun.Body, fc, sig, info, funcRef, "_"+o.Name())
 		joinedParams = strings.Join(params, ", ")
 		return []byte(fmt.Sprintf("\t%s = %s;\n", funcRef, fun))
 	}
@@ -716,7 +716,7 @@ func (fc *funcContext) translateToplevelFunction(fun *ast.FuncDecl, info *analys
 	return code.Bytes()
 }
 
-func translateFunction(typ *ast.FuncType, recv *ast.Ident, body *ast.BlockStmt, outerContext *funcContext, sig *types.Signature, info *analysis.FuncInfo, funcRef string) ([]string, string) {
+func translateFunction(typ *ast.FuncType, recv *ast.Ident, body *ast.BlockStmt, outerContext *funcContext, sig *types.Signature, info *analysis.FuncInfo, funcRef string, functionName string) ([]string, string) {
 	if info == nil {
 		panic("nil info")
 	}
@@ -785,7 +785,7 @@ func translateFunction(typ *ast.FuncType, recv *ast.Ident, body *ast.BlockStmt, 
 
 	sort.Strings(c.localVars)
 
-	var prefix, suffix, functionName string
+	var prefix, suffix string
 
 	if len(c.Flattened) != 0 {
 		c.localVars = append(c.localVars, "$s")
@@ -804,7 +804,7 @@ func translateFunction(typ *ast.FuncType, recv *ast.Ident, body *ast.BlockStmt, 
 		c.localVars = append(c.localVars, "$r")
 		if funcRef == "" {
 			funcRef = "$b"
-			functionName = " $b"
+			functionName = "$b"
 		}
 		var stores, loads string
 		for _, v := range c.localVars {
@@ -855,5 +855,8 @@ func translateFunction(typ *ast.FuncType, recv *ast.Ident, body *ast.BlockStmt, 
 
 	c.pkgCtx.escapingVars = prevEV
 
+	if functionName != "" {
+		functionName = " " + functionName
+	}
 	return params, fmt.Sprintf("function%s(%s) {\n%s%s}", functionName, strings.Join(params, ", "), bodyOutput, strings.Repeat("\t", c.pkgCtx.indentation))
 }
