@@ -219,8 +219,9 @@ func ParseCallFrame(info *js.Object) basicFrame {
 		line = parts.Index(parts.Length() - 2).Int()
 	}
 	fn := info.Call("substring", info.Call("indexOf", "at ").Int()+3, info.Call("indexOf", " (").Int())
-	if idx := fn.Call("indexOf", "[as ").Int(); idx > 0 {
-		fn = fn.Call("substring", idx+4, fn.Call("indexOf", "]"))
+	if idx := fn.Call("indexOf", " [as ").Int(); idx > 0 {
+		// fn = fn.Call("substring", idx+5, fn.Call("indexOf", "]"))
+		fn = fn.Call("substring", 0, idx)
 	}
 	funcName = fn.String()
 

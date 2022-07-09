@@ -8,6 +8,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -664,7 +665,12 @@ func (fc *funcContext) translateToplevelFunction(fun *ast.FuncDecl, info *analys
 			return []byte(fmt.Sprintf("\t%s = function() {\n\t\t$throwRuntimeError(\"native function not implemented: %s\");\n\t};\n", funcRef, o.FullName()))
 		}
 
-		params, fun := translateFunction(fun.Type, recv, fun.Body, fc, sig, info, funcRef, "_"+o.Name())
+		// clean := regexp.MustCompile("\\P{Letter}+")
+		clean := regexp.MustCompile("[^\\pL\\pN]+")
+		fname := clean.ReplaceAllString(o.FullName(), "_")
+		fname = strings.Trim(fname, "_")
+
+		params, fun := translateFunction(fun.Type, recv, fun.Body, fc, sig, info, funcRef, fname)
 		joinedParams = strings.Join(params, ", ")
 		return []byte(fmt.Sprintf("\t%s = %s;\n", funcRef, fun))
 	}
