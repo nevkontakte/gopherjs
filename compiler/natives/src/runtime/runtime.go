@@ -108,7 +108,7 @@ var (
 )
 
 func registerPosition(funcName string, file string, line int) uintptr {
-	key := file + ":" + itoa(line)
+	key := file + ":" + itoa(line) + ":" + funcName
 	if pc, found := knownPositions[key]; found {
 		return pc
 	}
